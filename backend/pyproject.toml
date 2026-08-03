@@ -1,0 +1,37 @@
+[project]
+name = "targethub-backend"
+version = "0.1.0"
+description = "TargetHub Backend"
+readme = "README.md"
+requires-python = ">=3.12"
+
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "sqlalchemy",
+    "alembic",
+    "pydantic-settings",
+    "python-dotenv",
+    "loguru",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+    "black",
+    "ruff",
+    "isort",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.isort]
+profile = "black"
