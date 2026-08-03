@@ -1,0 +1,9 @@
+"""
+Global constants used across TargetHub.
+"""
+
+API_PREFIX = "/api/v1"
+
+DEFAULT_RESERVATION_TIMEOUT_MINUTES = 60
+
+DEFAULT_SESSION_TIMEOUT_MINUTES = 30
