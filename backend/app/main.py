@@ -3,14 +3,7 @@ from fastapi import FastAPI
 from app.core.config import settings
 from app.core.logging import logger
 
-from app.db.base import Base
-from app.db.session import engine
-
-import app.db.models
-
 logger.info("Starting TargetHub...")
-
-Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title=settings.app_name,
