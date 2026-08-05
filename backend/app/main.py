@@ -1,7 +1,10 @@
 from fastapi import FastAPI
 
 from app.core.config import settings
+from app.core.exceptions import TargetHubException
+from app.core.handlers import targethub_exception_handler
 from app.core.logging import logger
+from app.core.middleware import RequestMiddleware
 
 logger.info("Starting TargetHub...")
 
@@ -9,6 +12,12 @@ app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
     description="Embedded Lab Orchestration Platform",
+)
+
+app.add_middleware(RequestMiddleware)
+app.add_exception_handler(
+    TargetHubException,
+    targethub_exception_handler,
 )
 
 
@@ -27,6 +36,7 @@ async def shutdown():
 async def root():
     return {
         "application": settings.app_name,
+        "version": settings.app_version,
         "status": "running",
     }
 
