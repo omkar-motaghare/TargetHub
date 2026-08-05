@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.api.router import api_router
 from app.core.config import settings
 from app.core.exceptions import TargetHubException
 from app.core.handlers import targethub_exception_handler
@@ -20,6 +21,8 @@ app.add_exception_handler(
     targethub_exception_handler,
 )
 
+app.include_router(api_router)
+
 
 @app.on_event("startup")
 async def startup():
@@ -38,11 +41,4 @@ async def root():
         "application": settings.app_name,
         "version": settings.app_version,
         "status": "running",
-    }
-
-
-@app.get("/health")
-async def health():
-    return {
-        "status": "healthy",
     }
