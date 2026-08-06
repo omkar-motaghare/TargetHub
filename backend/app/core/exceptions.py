@@ -1,14 +1,16 @@
-from fastapi import status
-
-
 class TargetHubException(Exception):
-    """Base exception for TargetHub."""
+    """Base application exception."""
 
-    def __init__(
-        self,
-        message: str,
-        status_code: int = status.HTTP_400_BAD_REQUEST,
-    ):
-        self.message = message
-        self.status_code = status_code
-        super().__init__(message)
+
+class ResourceNotFound(TargetHubException):
+    def __init__(self, resource: str, identifier: str):
+        self.resource = resource
+        self.identifier = identifier
+        super().__init__(f"{resource} '{identifier}' not found")
+
+
+class DuplicateResource(TargetHubException):
+    def __init__(self, resource: str, identifier: str):
+        self.resource = resource
+        self.identifier = identifier
+        super().__init__(f"{resource} '{identifier}' already exists")

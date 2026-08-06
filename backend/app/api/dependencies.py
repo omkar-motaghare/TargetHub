@@ -1,6 +1,13 @@
-"""
-Common FastAPI dependencies for TargetHub.
+from collections.abc import Generator
 
-Authentication, database sessions, permission checks,
-and request-scoped dependencies will live here.
-"""
+from sqlalchemy.orm import Session
+
+from app.db.session import SessionLocal
+
+
+def get_db() -> Generator[Session, None, None]:
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

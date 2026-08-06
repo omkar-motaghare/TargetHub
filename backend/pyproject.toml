@@ -35,3 +35,7 @@ target-version = "py312"
 
 [tool.isort]
 profile = "black"
+
+
+[tool.ruff.lint]
+ignore = ["B008"]

@@ -34,3 +34,7 @@ coverage/
 # Cache
 .cache/
 .pytest_cache/
+# SQLite
+*.db
+*.sqlite
+*.sqlite3
