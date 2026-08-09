@@ -10,23 +10,12 @@ from app.repositories.agent_repository import AgentRepository
 
 
 ENROLLMENT_TTL_MINUTES = 30
+AGENT_OFFLINE_AFTER_SECONDS = 45
 
 
 class AgentService:
     def __init__(self, repository: AgentRepository):
         self.repository = repository
-
-    def list_agents(self):
-        return self.repository.list()
-
-    def list_enrollments(self):
-        return self.repository.list_enrollments()
-
-    def get_agent(self, agent_id: str):
-        agent = self.repository.get(agent_id)
-        if not agent:
-            raise ResourceNotFound("Agent", agent_id)
-        return agent
 
     @staticmethod
     def _hash_secret(value: str) -> str:
@@ -43,6 +32,37 @@ class AgentService:
     @staticmethod
     def _now() -> datetime:
         return datetime.now(timezone.utc)
+
+    def _refresh_liveness(self, agents: list[Agent]):
+        cutoff = self._now() - timedelta(seconds=AGENT_OFFLINE_AFTER_SECONDS)
+        changed = False
+        for agent in agents:
+            if agent.status != "online" or not agent.last_seen_at:
+                continue
+            last_seen = agent.last_seen_at
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            if last_seen < cutoff:
+                agent.status = "offline"
+                changed = True
+        if changed:
+            for agent in agents:
+                if agent.status == "offline":
+                    self.repository.save(agent)
+        return agents
+
+    def list_agents(self):
+        return self._refresh_liveness(self.repository.list())
+
+    def list_enrollments(self):
+        return self.repository.list_enrollments()
+
+    def get_agent(self, agent_id: str):
+        agent = self.repository.get(agent_id)
+        if not agent:
+            raise ResourceNotFound("Agent", agent_id)
+        self._refresh_liveness([agent])
+        return agent
 
     def create_enrollment(self, agent_name: str, deployment_scenario: str):
         if not agent_name.strip():
