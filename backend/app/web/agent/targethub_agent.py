@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import platform
 import socket
 import sys
 import time
@@ -93,7 +92,7 @@ def discover_resources(config: dict) -> list[dict]:
     return resources
 
 
-def enroll(config: dict) -> None:
+def enroll(config: dict, config_path: Path) -> None:
     targethub_url = config["targethub_url"].rstrip("/")
     token = config.get("enrollment_token")
     if not token:
@@ -106,7 +105,7 @@ def enroll(config: dict) -> None:
     config["agent_id"] = result["agent"]["id"]
     config["credential"] = result["credential"]
     config.pop("enrollment_token", None)
-    save_config(Path(config["config_path"]), config)
+    save_config(config_path, config)
     print(f"Enrolled Agent {config['agent_id']}")
 
 
@@ -130,11 +129,10 @@ def main() -> int:
     args = parser.parse_args()
     config_path = Path(args.config)
     config = load_config(config_path)
-    config["config_path"] = str(config_path)
     interval = max(5, int(config.get("heartbeat_interval", DEFAULT_INTERVAL)))
 
     if config.get("enrollment_token"):
-        enroll(config)
+        enroll(config, config_path)
 
     if not config.get("agent_id") or not config.get("credential"):
         raise RuntimeError("Agent is not enrolled. Provide an enrollment token in the configuration.")
