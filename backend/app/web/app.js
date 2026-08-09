@@ -1,14 +1,12 @@
 const API = "/api/v1";
 const USER = "developer";
 const CAPABILITY_TYPES = ["serial", "network", "ssh", "telnet", "ftp", "jlink", "power", "reset"];
+let AGENTS = [];
 
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 
-function showMessage(text) {
-  $("message").textContent = text;
-  $("message").classList.remove("hidden");
-}
+function showMessage(text) { $("message").textContent = text; $("message").classList.remove("hidden"); }
 function clearMessage() { $("message").classList.add("hidden"); }
 
 async function request(path, options = {}) {
@@ -27,9 +25,7 @@ function statusFor(target, reservations) {
 function renderTargets(targets, reservations) {
   const available = targets.filter(t => statusFor(t, reservations) === "available").length;
   const reserved = targets.filter(t => statusFor(t, reservations) === "reserved").length;
-  $("total").textContent = targets.length;
-  $("available").textContent = available;
-  $("reserved").textContent = reserved;
+  $("total").textContent = targets.length; $("available").textContent = available; $("reserved").textContent = reserved;
   $("targets").innerHTML = targets.map(target => {
     const status = statusFor(target, reservations);
     const reservation = reservations.find(r => r.target_id === target.id && r.status === "active");
@@ -50,33 +46,60 @@ function renderReservations(reservations, targets) {
   document.querySelectorAll("button[data-release]").forEach(button => button.addEventListener("click", () => releaseReservation(button.dataset.release)));
 }
 
+function agentOptions(selectedId) {
+  const options = AGENTS.filter(a => a.enabled).map(a => `<option value="${esc(a.id)}" ${a.id === selectedId ? "selected" : ""}>${esc(a.name)}${a.status === "online" ? " (online)" : " (offline)"}</option>`).join("");
+  return `<option value="">Select Agent</option>${options}`;
+}
+
+function resourceOptions(agentId, selectedId) {
+  const agent = AGENTS.find(a => a.id === agentId);
+  const resources = (agent?.resources || []).filter(r => r.available);
+  return `<option value="">Select detected resource</option>${resources.map(r => `<option value="${esc(r.id)}" ${r.id === selectedId ? "selected" : ""}>${esc(r.display_name)} (${esc(r.resource_type)})</option>`).join("")}`;
+}
+
 function capabilityRow(capability = {}) {
-  const config = JSON.stringify(capability.provider_config || {}, null, 2);
-  return `<div class="capability-row" data-capability-row><label>Name<input data-cap-name value="${esc(capability.name || "")}" placeholder="serial-console" required></label><label>Type<select data-cap-type>${CAPABILITY_TYPES.map(type => `<option value="${type}" ${type === capability.capability_type ? "selected" : ""}>${type}</option>`).join("")}</select></label><label>Provider key<input data-cap-provider value="${esc(capability.provider_key || "")}" placeholder="serial.dev.01"></label><label class="wide">Provider configuration (JSON)<textarea data-cap-config rows="3" placeholder='{"device_path":"/dev/ttyUSB0","baudrate":115200}'>${esc(config)}</textarea></label><label class="checkbox"><input type="checkbox" data-cap-enabled ${capability.enabled !== false ? "checked" : ""}> Enabled</label><button type="button" class="danger" data-remove-cap>Remove</button><input type="hidden" data-cap-id value="${esc(capability.id || "")}"></div>`;
+  const selectedAgent = capability.agent_id || "";
+  return `<div class="capability-row" data-capability-row>
+    <label>Name<input data-cap-name value="${esc(capability.name || "")}" placeholder="serial-console" required></label>
+    <label>Type<select data-cap-type>${CAPABILITY_TYPES.map(type => `<option value="${type}" ${type === capability.capability_type ? "selected" : ""}>${type}</option>`).join("")}</select></label>
+    <label>Agent<select data-cap-agent>${agentOptions(selectedAgent)}</select></label>
+    <label class="wide">Detected hardware resource<select data-cap-resource>${resourceOptions(selectedAgent, capability.resource_id || "")}</select></label>
+    <label class="checkbox"><input type="checkbox" data-cap-enabled ${capability.enabled !== false ? "checked" : ""}> Enabled</label>
+    <button type="button" class="danger" data-remove-cap>Remove</button>
+    <input type="hidden" data-cap-id value="${esc(capability.id || "")}">
+  </div>`;
 }
 
 function addCapability(capability = {}) {
   $("capabilities").insertAdjacentHTML("beforeend", capabilityRow(capability));
-  bindCapabilityRemoveButtons();
+  bindCapabilityRemoveButtons(); bindAgentResourceSelectors();
 }
 
 function bindCapabilityRemoveButtons() {
-  document.querySelectorAll("button[data-remove-cap]").forEach(button => {
-    button.onclick = () => button.closest("[data-capability-row]").remove();
+  document.querySelectorAll("button[data-remove-cap]").forEach(button => { button.onclick = () => button.closest("[data-capability-row]").remove(); });
+}
+
+function bindAgentResourceSelectors() {
+  document.querySelectorAll("[data-cap-agent]").forEach(select => {
+    select.onchange = () => {
+      const row = select.closest("[data-capability-row]");
+      row.querySelector("[data-cap-resource]").innerHTML = resourceOptions(select.value, "");
+    };
   });
 }
 
 function collectCapabilities() {
   return [...document.querySelectorAll("[data-capability-row]")].map(row => {
-    let providerConfig = {};
-    const raw = row.querySelector("[data-cap-config]").value.trim();
-    if (raw) providerConfig = JSON.parse(raw);
+    const agentId = row.querySelector("[data-cap-agent]").value || null;
+    const resourceId = row.querySelector("[data-cap-resource]").value || null;
     return {
       id: row.querySelector("[data-cap-id]").value || undefined,
       name: row.querySelector("[data-cap-name]").value.trim(),
       capability_type: row.querySelector("[data-cap-type]").value,
-      provider_key: row.querySelector("[data-cap-provider]").value.trim() || null,
-      provider_config: providerConfig,
+      agent_id: agentId,
+      resource_id: resourceId,
+      provider_key: null,
+      provider_config: {},
       enabled: row.querySelector("[data-cap-enabled]").checked,
     };
   });
@@ -88,30 +111,14 @@ async function saveTarget(event) {
     clearMessage();
     const targetId = $("target-id").value;
     const capabilities = collectCapabilities();
-    const payload = {
-      name: $("target-name").value.trim(),
-      description: $("target-description").value.trim() || null,
-      vendor: $("target-vendor").value.trim() || null,
-      board_model: $("target-model").value.trim() || null,
-      serial_number: $("target-serial").value.trim() || null,
-      lab_name: $("target-lab").value.trim() || null,
-      location: $("target-location").value.trim() || null,
-      status: "available",
-      enabled: true,
-    };
-
+    const payload = { name: $("target-name").value.trim(), description: $("target-description").value.trim() || null, vendor: $("target-vendor").value.trim() || null, board_model: $("target-model").value.trim() || null, serial_number: $("target-serial").value.trim() || null, lab_name: $("target-lab").value.trim() || null, location: $("target-location").value.trim() || null, status: "available", enabled: true };
     let target;
     if (targetId) {
       target = await request(`/targets/${targetId}`, { method: "PUT", body: JSON.stringify(payload) });
       const existing = target.capabilities || [];
-      const desired = capabilities;
-      const desiredIds = new Set(desired.filter(c => c.id).map(c => c.id));
-      for (const oldCapability of existing) {
-        if (!desiredIds.has(oldCapability.id)) {
-          await request(`/targets/${targetId}/capabilities/${oldCapability.id}`, { method: "DELETE" });
-        }
-      }
-      for (const capability of desired) {
+      const desiredIds = new Set(capabilities.filter(c => c.id).map(c => c.id));
+      for (const oldCapability of existing) if (!desiredIds.has(oldCapability.id)) await request(`/targets/${targetId}/capabilities/${oldCapability.id}`, { method: "DELETE" });
+      for (const capability of capabilities) {
         if (capability.id) {
           const { id, ...update } = capability;
           await request(`/targets/${targetId}/capabilities/${id}`, { method: "PUT", body: JSON.stringify(update) });
@@ -121,72 +128,32 @@ async function saveTarget(event) {
         }
       }
     } else {
-      const createPayload = { ...payload, capabilities: capabilities.map(({ id, ...c }) => c) };
-      target = await request("/targets", { method: "POST", body: JSON.stringify(createPayload) });
+      target = await request("/targets", { method: "POST", body: JSON.stringify({ ...payload, capabilities: capabilities.map(({ id, ...c }) => c) }) });
     }
-
-    resetTargetForm();
-    await load();
-    showMessage(`${target.name} saved successfully.`);
-  } catch (error) {
-    showMessage(error.message);
-  }
+    resetTargetForm(); await load(); showMessage(`${target.name} saved successfully.`);
+  } catch (error) { showMessage(error.message); }
 }
 
 async function editTarget(targetId) {
   try {
-    clearMessage();
-    const target = await request(`/targets/${targetId}`);
-    $("target-id").value = target.id;
-    $("target-name").value = target.name || "";
-    $("target-description").value = target.description || "";
-    $("target-vendor").value = target.vendor || "";
-    $("target-model").value = target.board_model || "";
-    $("target-serial").value = target.serial_number || "";
-    $("target-lab").value = target.lab_name || "";
-    $("target-location").value = target.location || "";
-    $("capabilities").innerHTML = (target.capabilities || []).map(capabilityRow).join("");
-    bindCapabilityRemoveButtons();
-    $("cancel-edit").classList.remove("hidden");
-    document.querySelector(".admin-panel").scrollIntoView({ behavior: "smooth" });
+    clearMessage(); const target = await request(`/targets/${targetId}`);
+    $("target-id").value = target.id; $("target-name").value = target.name || ""; $("target-description").value = target.description || ""; $("target-vendor").value = target.vendor || ""; $("target-model").value = target.board_model || ""; $("target-serial").value = target.serial_number || ""; $("target-lab").value = target.lab_name || ""; $("target-location").value = target.location || "";
+    $("capabilities").innerHTML = (target.capabilities || []).map(capabilityRow).join(""); bindCapabilityRemoveButtons(); bindAgentResourceSelectors(); $("cancel-edit").classList.remove("hidden"); document.querySelector(".admin-panel").scrollIntoView({ behavior: "smooth" });
   } catch (error) { showMessage(error.message); }
 }
 
-function resetTargetForm() {
-  $("target-form").reset();
-  $("target-id").value = "";
-  $("capabilities").innerHTML = "";
-  $("cancel-edit").classList.add("hidden");
-}
+function resetTargetForm() { $("target-form").reset(); $("target-id").value = ""; $("capabilities").innerHTML = ""; $("cancel-edit").classList.add("hidden"); }
 
-async function reserve(targetId) {
-  const now = new Date();
-  const end = new Date(now.getTime() + 60 * 60 * 1000);
-  try {
-    clearMessage();
-    await request("/reservations", { method: "POST", body: JSON.stringify({ target_id: targetId, user_id: USER, starts_at: now.toISOString(), ends_at: end.toISOString() }) });
-    await load();
-  } catch (error) { showMessage(error.message); }
-}
-
-async function releaseReservation(reservationId) {
-  try {
-    clearMessage();
-    await request(`/reservations/${reservationId}/release?user_id=${encodeURIComponent(USER)}`, { method: "POST" });
-    await load();
-  } catch (error) { showMessage(error.message); }
-}
+async function reserve(targetId) { const now = new Date(); const end = new Date(now.getTime() + 60 * 60 * 1000); try { clearMessage(); await request("/reservations", { method: "POST", body: JSON.stringify({ target_id: targetId, user_id: USER, starts_at: now.toISOString(), ends_at: end.toISOString() }) }); await load(); } catch (error) { showMessage(error.message); } }
+async function releaseReservation(reservationId) { try { clearMessage(); await request(`/reservations/${reservationId}/release?user_id=${encodeURIComponent(USER)}`, { method: "POST" }); await load(); } catch (error) { showMessage(error.message); } }
 
 async function load() {
   try {
     clearMessage();
-    const [targets, reservations] = await Promise.all([request("/targets"), request("/reservations")]);
-    renderTargets(targets, reservations);
-    renderReservations(reservations, targets);
-  } catch (error) {
-    showMessage(`Unable to load TargetHub data: ${error.message}`);
-    $("targets").innerHTML = "";
-  }
+    const [targets, reservations, agents] = await Promise.all([request("/targets"), request("/reservations"), request("/agents")]);
+    AGENTS = agents; renderTargets(targets, reservations); renderReservations(reservations, targets);
+    if (!AGENTS.length) showMessage("No TargetHub Agents are registered yet. Register an Agent to configure physical resources.");
+  } catch (error) { showMessage(`Unable to load TargetHub data: ${error.message}`); $("targets").innerHTML = ""; }
 }
 
 $("refresh").addEventListener("click", load);
