@@ -11,9 +11,14 @@ class AgentResourceCreate(BaseModel):
     available: bool = True
 
 
-class AgentResourceResponse(AgentResourceCreate):
+class AgentResourceResponse(BaseModel):
     id: str
     agent_id: str
+    resource_key: str
+    resource_type: str
+    display_name: str
+    metadata: dict = Field(default_factory=dict, validation_alias="resource_metadata")
+    available: bool
     created_at: datetime
     updated_at: datetime
 
