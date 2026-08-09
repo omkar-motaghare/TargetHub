@@ -43,7 +43,7 @@ class AgentService:
                     resource_key=item.resource_key,
                     resource_type=item.resource_type,
                     display_name=item.display_name,
-                    metadata=item.metadata,
+                    resource_metadata=item.metadata,
                     available=item.available,
                 )
             )
