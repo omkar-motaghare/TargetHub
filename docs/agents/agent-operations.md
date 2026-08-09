@@ -14,6 +14,7 @@ TargetHub now provides the complete first-version Agent enrollment lifecycle:
 8. TargetHub stores the latest discovered resources.
 9. Team Admin can see Agent status and resources in the Web UI.
 10. Team Admin can disable/enable an Agent or revoke its credential.
+11. Agents with no heartbeat for more than 45 seconds are shown as offline.
 
 The raw enrollment token and raw Agent credential are never returned by Agent listing APIs. Each secret is displayed only at the point where it is issued.
 
