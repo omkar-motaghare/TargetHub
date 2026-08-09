@@ -13,6 +13,7 @@ dependencies = [
     "pydantic-settings",
     "python-dotenv",
     "loguru",
+    "pyserial",
 ]
 
 [dependency-groups]
