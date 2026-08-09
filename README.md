@@ -2,6 +2,8 @@
 
 > **One Platform. Every Target.**
 
+**Author:** Omkar Motaghare
+
 TargetHub is an open-source **Embedded Lab Orchestration Platform** that enables engineering teams to efficiently manage shared embedded hardware through a unified interface. It provides target reservation, exclusive hardware access, power control, serial console, firmware deployment, debugger integration, and lab automation—eliminating resource conflicts while improving developer productivity.
 
 > 🚧 **Project Status:** Early Development (Sprint 0 – Foundation & Architecture)
