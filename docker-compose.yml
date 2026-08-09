@@ -1,0 +1,23 @@
+services:
+  targethub:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: targethub
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      APP_NAME: TargetHub
+      APP_VERSION: 0.1.0
+      ENVIRONMENT: development
+      HOST: 0.0.0.0
+      PORT: 8000
+      LOG_LEVEL: INFO
+      DATABASE_URL: sqlite:////data/targethub.db
+      SECRET_KEY: ${SECRET_KEY:-targethub-dev-only-change-me}
+    volumes:
+      - targethub_data:/data
+
+volumes:
+  targethub_data:
