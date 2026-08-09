@@ -43,43 +43,52 @@ def upgrade() -> None:
     bind = op.get_bind()
     inspector = inspect(bind)
 
-    if not _table_exists(inspector, "agents"):
-        op.create_table(
-            "agents",
-            sa.Column("id", sa.String(length=36), nullable=False),
-            sa.Column("name", sa.String(length=100), nullable=False),
-            sa.Column("hostname", sa.String(length=255), nullable=True),
-            sa.Column("status", sa.String(length=32), nullable=False),
-            sa.Column("enabled", sa.Boolean(), nullable=False),
-            sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=True),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=True),
-            sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=True),
-            sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("name"),
-        )
+    # The service can restart while the migration is being applied.  SQLite
+    # DDL is non-transactional, so a previous/concurrent migration may have
+    # created a table even though the Alembic revision has not been stamped.
+    # Use IF NOT EXISTS at the DDL level as the final guard instead of relying
+    # only on an Inspector snapshot.
+    op.create_table(
+        "agents",
+        sa.Column("id", sa.String(length=36), nullable=False),
+        sa.Column("name", sa.String(length=100), nullable=False),
+        sa.Column("hostname", sa.String(length=255), nullable=True),
+        sa.Column("status", sa.String(length=32), nullable=False),
+        sa.Column("enabled", sa.Boolean(), nullable=False),
+        sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("name"),
+        if_not_exists=True,
+    )
+
+    op.create_table(
+        "agent_resources",
+        sa.Column("id", sa.String(length=36), nullable=False),
+        sa.Column("agent_id", sa.String(length=36), nullable=False),
+        sa.Column("resource_key", sa.String(length=255), nullable=False),
+        sa.Column("resource_type", sa.String(length=64), nullable=False),
+        sa.Column("display_name", sa.String(length=255), nullable=False),
+        sa.Column("metadata", sa.JSON(), nullable=False),
+        sa.Column("available", sa.Boolean(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=True),
+        sa.ForeignKeyConstraint(["agent_id"], ["agents.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        if_not_exists=True,
+    )
 
     inspector = inspect(bind)
 
-    if not _table_exists(inspector, "agent_resources"):
-        op.create_table(
-            "agent_resources",
-            sa.Column("id", sa.String(length=36), nullable=False),
-            sa.Column("agent_id", sa.String(length=36), nullable=False),
-            sa.Column("resource_key", sa.String(length=255), nullable=False),
-            sa.Column("resource_type", sa.String(length=64), nullable=False),
-            sa.Column("display_name", sa.String(length=255), nullable=False),
-            sa.Column("metadata", sa.JSON(), nullable=False),
-            sa.Column("available", sa.Boolean(), nullable=False),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=True),
-            sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=True),
-            sa.ForeignKeyConstraint(["agent_id"], ["agents.id"], ondelete="CASCADE"),
-            sa.PrimaryKeyConstraint("id"),
-        )
+    op.create_index(
+        "ix_agent_resources_agent_id",
+        "agent_resources",
+        ["agent_id"],
+        if_not_exists=True,
+    )
 
     inspector = inspect(bind)
-
-    if not _index_exists(inspector, "agent_resources", "ix_agent_resources_agent_id"):
-        op.create_index("ix_agent_resources_agent_id", "agent_resources", ["agent_id"])
 
     if not _column_exists(inspector, "target_capabilities", "agent_id"):
         op.add_column(
@@ -87,27 +96,26 @@ def upgrade() -> None:
             sa.Column("agent_id", sa.String(length=36), nullable=True),
         )
 
+    inspector = inspect(bind)
     if not _column_exists(inspector, "target_capabilities", "resource_id"):
         op.add_column(
             "target_capabilities",
             sa.Column("resource_id", sa.String(length=36), nullable=True),
         )
 
-    inspector = inspect(bind)
+    op.create_index(
+        "ix_target_capabilities_agent_id",
+        "target_capabilities",
+        ["agent_id"],
+        if_not_exists=True,
+    )
 
-    if not _index_exists(inspector, "target_capabilities", "ix_target_capabilities_agent_id"):
-        op.create_index(
-            "ix_target_capabilities_agent_id",
-            "target_capabilities",
-            ["agent_id"],
-        )
-
-    if not _index_exists(inspector, "target_capabilities", "ix_target_capabilities_resource_id"):
-        op.create_index(
-            "ix_target_capabilities_resource_id",
-            "target_capabilities",
-            ["resource_id"],
-        )
+    op.create_index(
+        "ix_target_capabilities_resource_id",
+        "target_capabilities",
+        ["resource_id"],
+        if_not_exists=True,
+    )
 
     inspector = inspect(bind)
     agent_fk_exists = _foreign_key_exists(
@@ -186,11 +194,8 @@ def downgrade() -> None:
     inspector = inspect(bind)
 
     if _table_exists(inspector, "agent_resources"):
-        op.drop_index("ix_agent_resources_agent_id", table_name="agent_resources") if _index_exists(
-            inspector,
-            "agent_resources",
-            "ix_agent_resources_agent_id",
-        ) else None
+        if _index_exists(inspector, "agent_resources", "ix_agent_resources_agent_id"):
+            op.drop_index("ix_agent_resources_agent_id", table_name="agent_resources")
         op.drop_table("agent_resources")
 
     inspector = inspect(bind)
