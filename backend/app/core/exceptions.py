@@ -14,3 +14,10 @@ class DuplicateResource(TargetHubException):
         self.resource = resource
         self.identifier = identifier
         super().__init__(f"{resource} '{identifier}' already exists")
+
+
+class ConflictResource(TargetHubException):
+    """Raised when a requested operation conflicts with current state."""
+
+    def __init__(self, message: str):
+        super().__init__(message)

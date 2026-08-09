@@ -36,8 +36,8 @@ class Target(Base):
     lab_name: Mapped[str | None] = mapped_column(String(100))
     location: Mapped[str | None] = mapped_column(String(100))
 
-    # Operational state. Reservation ownership will be modeled separately
-    # by the Reservation domain and must not be inferred from this field.
+    # Operational state. Reservation ownership is modeled separately by the
+    # Reservation domain and must not be inferred from this field.
     status: Mapped[str] = mapped_column(
         String(32),
         default="available",
@@ -66,4 +66,11 @@ class Target(Base):
         back_populates="target",
         cascade="all, delete-orphan",
         order_by="TargetCapability.name",
+    )
+
+    reservations = relationship(
+        "Reservation",
+        back_populates="target",
+        cascade="all, delete-orphan",
+        order_by="Reservation.starts_at",
     )

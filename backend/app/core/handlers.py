@@ -2,6 +2,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from app.core.exceptions import (
+    ConflictResource,
     DuplicateResource,
     ResourceNotFound,
     TargetHubException,
@@ -18,7 +19,7 @@ async def targethub_exception_handler(
             content={"detail": str(exc)},
         )
 
-    if isinstance(exc, DuplicateResource):
+    if isinstance(exc, (DuplicateResource, ConflictResource)):
         return JSONResponse(
             status_code=409,
             content={"detail": str(exc)},
