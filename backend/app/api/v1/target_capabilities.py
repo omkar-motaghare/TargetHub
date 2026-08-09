@@ -9,6 +9,7 @@ from app.repositories.target_repository import TargetRepository
 from app.schemas.target_capability import (
     TargetCapabilityCreate,
     TargetCapabilityResponse,
+    TargetCapabilityUpdate,
 )
 from app.services.target_capability_service import TargetCapabilityService
 
@@ -51,13 +52,13 @@ def create_capability(
 def update_capability(
     target_id: str,
     capability_id: str,
-    request: TargetCapabilityCreate,
+    request: TargetCapabilityUpdate,
     service: Service,
 ):
     return service.update_capability(
         target_id,
         capability_id,
-        **request.model_dump(),
+        **request.model_dump(exclude_unset=True),
     )
 
 
