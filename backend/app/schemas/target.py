@@ -1,6 +1,11 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.schemas.target_capability import (
+    TargetCapabilityCreate,
+    TargetCapabilityResponse,
+)
 
 
 class TargetBase(BaseModel):
@@ -16,7 +21,7 @@ class TargetBase(BaseModel):
 
 
 class TargetCreate(TargetBase):
-    pass
+    capabilities: list[TargetCapabilityCreate] = Field(default_factory=list)
 
 
 class TargetUpdate(BaseModel):
@@ -33,6 +38,7 @@ class TargetUpdate(BaseModel):
 
 class TargetResponse(TargetBase):
     id: str
+    capabilities: list[TargetCapabilityResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
