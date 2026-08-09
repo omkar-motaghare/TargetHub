@@ -1,7 +1,7 @@
 """add target sessions
 
 Revision ID: 5e7a9c1d2f34
-Revises: 4b1d2f7c9a10
+Revises: 7c3e1a9f2b44
 """
 
 from collections.abc import Sequence
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "5e7a9c1d2f34"
-down_revision: str | Sequence[str] | None = "4b1d2f7c9a10"
+down_revision: str | Sequence[str] | None = "7c3e1a9f2b44"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
