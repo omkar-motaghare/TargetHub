@@ -17,9 +17,9 @@ This file records the implementation-facing rules from the TargetHub Architectur
 - Access exclusivity is only guaranteed where the deployment controls the access path.
 - Development proceeds through small functional vertical slices.
 
-## Target capability model
+## Target capability and Agent resource model
 
-The implementation now represents a target as:
+A Target remains a logical resource. A capability identifies an interface, while an Agent owns the physical resources available on a host.
 
 ```text
 Target
@@ -33,24 +33,54 @@ Target
       ├── jlink
       ├── power
       └── reset
+
+Agent
+ └── discovered resources
+      ├── serial device
+      ├── J-Link
+      ├── network resource
+      └── other hardware resources
 ```
 
-`provider_key` identifies the provider implementation/configuration responsible for a capability. `provider_config` stores provider-specific target configuration separately from Target metadata. The TargetHub Server stores this configuration; the Agent/provider is responsible for interpreting it when it reaches the physical host.
+The Server stores the relationship:
 
-Example:
+```text
+Target capability -> Agent -> discovered physical resource
+```
+
+`provider_key` and `provider_config` remain internal implementation fields. They are not part of the normal team-admin workflow. The Web UI asks the administrator to select an Agent and a resource discovered by that Agent; the backend can persist provider-specific details without requiring the administrator to enter JSON or Linux device paths manually.
+
+Example user-facing flow:
+
+```text
+BOARD-01
+  -> Add capability: Serial Console
+  -> Select Agent: lab-pi-01
+  -> Select detected resource: USB Serial /dev/ttyUSB0
+  -> Save
+```
+
+Example internal relationship:
 
 ```text
 BOARD-01
   └── serial-console
-       ├── capability_type: serial
-       ├── provider_key: serial.dev.01
-       └── provider_config:
-            device_path: /dev/ttyUSB0
-            baudrate: 115200
-            timeout: 0.2
+       ├── agent_id: lab-pi-01
+       ├── resource_id: detected-resource-id
+       └── provider configuration: internal
 ```
 
-This means an administrator can configure the logical `/dev/ttyUSB0` mapping for a team's chosen host/Agent without adding hardware-specific columns to the Target table.
+## Agent discovery contract
+
+The current implementation establishes the first Agent boundary as a registry/discovery contract:
+
+- An Agent can register with the Server.
+- An Agent can report its hostname and currently discovered resources through heartbeat.
+- Resources have a type, display name, stable resource key, metadata, and availability state.
+- The Server exposes registered Agents and their resources to the Web UI.
+- The physical discovery implementation on Linux/Raspberry Pi is intentionally a subsequent Agent increment.
+
+This keeps the Web UI independent of `/dev/ttyUSB*`, J-Link serial numbers, or other host-specific details.
 
 ## Deployment model
 
@@ -73,37 +103,36 @@ flowchart TB
 flowchart LR
     Admin[Team Admin] --> UI[TargetHub Web UI]
     UI --> Target[Target metadata]
-    UI --> Cap[Target capabilities]
-    Cap --> Config[Provider-specific configuration]
-    Config --> Server[TargetHub Server / Database]
-    Server --> Agent[TargetHub Agent]
-    Agent --> Hardware[Physical target interfaces]
+    UI --> Cap[Target capability]
+    UI --> Agent[Select Agent]
+    Agent --> Resource[Select discovered resource]
+    Resource --> Server[TargetHub Server / Database]
+    Server --> AgentRuntime[TargetHub Agent]
+    AgentRuntime --> Hardware[Physical target interface]
 ```
 
-The current Web UI provides the first administration slice: a team administrator can create/edit targets and add/remove/configure capabilities. The capability configuration is persisted as provider-specific configuration. Authentication/RBAC enforcement is a separate security increment; the current development UI uses the existing local `developer` identity.
+The current Web UI provides the first administration slice: a team administrator can create/edit targets and add/remove/configure capabilities by selecting an Agent and detected resource. Authentication/RBAC enforcement is a separate security increment; the current development UI uses the existing local `developer` identity.
 
 The user workflow is:
 
 ```text
 User -> Target list -> Reserve -> Authorized session -> Capability access
-Admin -> Target administration -> Configure target/capabilities
+Admin -> Target administration -> Select Agent/resource -> Configure target/capabilities
 ```
 
 ## Development sequence
 
-1. Preserve and evolve existing Target CRUD.
-2. Establish Target capability abstraction. **Done in the alignment pass.**
-3. Establish Agent/provider boundaries. **Done in the alignment pass.**
+1. Preserve and evolve existing Target CRUD. **Done.**
+2. Establish Target capability abstraction. **Done.**
+3. Establish Agent/provider boundaries. **Initial Agent registry/resource discovery contract now implemented; physical Agent discovery remains.**
 4. Implement Reservation Engine. **Done and manually verified.**
 5. Implement Session model and authorization boundary. **Done and manually verified.**
-6. Implement Serial as the first real provider. **Initial provider slice done: concrete pyserial provider, deployment configuration, health API, and provider-specific capability configuration.**
-7. Complete the first Web UI workflow for team target administration and reservation/release. **Initial administration slice now implemented; reservation/release already available in the dashboard.**
-8. Continue Serial through the Agent/device transport and session-bound serial access.
+6. Implement Serial as the first real provider. **Initial pyserial provider and health API exist; physical Agent/device transport remains.**
+7. Complete the first Web UI workflow for team target administration and reservation/release. **Administration now selects Agent resources; reservation/release is available.**
+8. Implement physical Agent discovery and session-bound serial access.
 9. Implement DD Power/Reset.
 10. Design and implement network/SSH/Telnet/FTP enforcement.
 11. Validate J-Link/Cortex-Debug integration.
 12. Add CLI and later VS Code integration.
-
-The serial work remains intentionally incremental. The current slice establishes the concrete provider boundary and hardware configuration path; session-bound serial streaming and the TargetHub Agent/device transport are subsequent serial slices.
 
 Material architectural changes must trigger an architecture version review rather than silently changing the baseline.
