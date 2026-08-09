@@ -57,12 +57,14 @@ flowchart TB
 1. Preserve and evolve existing Target CRUD.
 2. Establish Target capability abstraction. **Done in the alignment pass.**
 3. Establish Agent/provider boundaries. **Done in the alignment pass.**
-4. Implement Reservation Engine.
-5. Implement Session model and authorization boundary.
-6. Implement Serial as the first real provider.
+4. Implement Reservation Engine. **Done and manually verified.**
+5. Implement Session model and authorization boundary. **Done and manually verified.**
+6. Implement Serial as the first real provider. **Initial provider slice done: concrete pyserial provider, deployment configuration, and health API.**
 7. Implement DD Power/Reset.
 8. Design and implement network/SSH/Telnet/FTP enforcement.
 9. Validate J-Link/Cortex-Debug integration.
 10. Add CLI and later VS Code integration.
+
+The serial work is intentionally incremental. The current slice establishes the concrete provider boundary and hardware health/configuration path; session-bound serial streaming and the TargetHub Agent/device transport are subsequent serial slices.
 
 Material architectural changes must trigger an architecture version review rather than silently changing the baseline.
