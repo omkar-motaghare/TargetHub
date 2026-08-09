@@ -35,7 +35,7 @@ class AgentService:
 
     def _refresh_liveness(self, agents: list[Agent]):
         cutoff = self._now() - timedelta(seconds=AGENT_OFFLINE_AFTER_SECONDS)
-        changed = False
+        changed_agents = []
         for agent in agents:
             if agent.status != "online" or not agent.last_seen_at:
                 continue
@@ -44,11 +44,9 @@ class AgentService:
                 last_seen = last_seen.replace(tzinfo=timezone.utc)
             if last_seen < cutoff:
                 agent.status = "offline"
-                changed = True
-        if changed:
-            for agent in agents:
-                if agent.status == "offline":
-                    self.repository.save(agent)
+                changed_agents.append(agent)
+        for agent in changed_agents:
+            self.repository.save(agent)
         return agents
 
     def list_agents(self):
