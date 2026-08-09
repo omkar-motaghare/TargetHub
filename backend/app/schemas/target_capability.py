@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CapabilityType(StrEnum):
@@ -21,11 +21,20 @@ class TargetCapabilityBase(BaseModel):
     name: str
     capability_type: CapabilityType
     provider_key: str | None = None
+    provider_config: dict = Field(default_factory=dict)
     enabled: bool = True
 
 
 class TargetCapabilityCreate(TargetCapabilityBase):
     pass
+
+
+class TargetCapabilityUpdate(BaseModel):
+    name: str | None = None
+    capability_type: CapabilityType | None = None
+    provider_key: str | None = None
+    provider_config: dict | None = None
+    enabled: bool | None = None
 
 
 class TargetCapabilityResponse(TargetCapabilityBase):
