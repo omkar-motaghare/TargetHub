@@ -28,7 +28,7 @@
     <section id="targets" class="target-grid" aria-live="polite"></section>
 
     <section class="panel admin-panel">
-      <div class="panel-head"><div><p class="eyebrow">ADMINISTRATION</p><h2>Manage targets</h2></div><span class="muted">Team administrators configure targets and capabilities.</span></div>
+      <div class="panel-head"><div><p class="eyebrow">ADMINISTRATION</p><h2>Manage targets</h2></div><span class="muted">Team administrators configure targets and select physical resources discovered by an Agent.</span></div>
       <form id="target-form" class="form-grid">
         <input type="hidden" id="target-id">
         <label>Target name *<input id="target-name" required placeholder="BOARD-01"></label>
@@ -40,7 +40,7 @@
         <label class="wide">Description<textarea id="target-description" rows="2" placeholder="Development test board"></textarea></label>
 
         <div class="wide capability-editor">
-          <div class="capability-head"><div><strong>Capabilities</strong><p class="muted">Choose the interfaces this target exposes. Provider configuration is stored with the capability and interpreted later by the Agent/provider.</p></div><button type="button" class="secondary" id="add-capability">+ Add capability</button></div>
+          <div class="capability-head"><div><strong>Capabilities</strong><p class="muted">Choose the interfaces this target exposes, then select the Agent and detected physical resource that provides the interface.</p></div><button type="button" class="secondary" id="add-capability">+ Add capability</button></div>
           <div id="capabilities"></div>
         </div>
 
