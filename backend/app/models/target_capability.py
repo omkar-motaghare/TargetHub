@@ -12,52 +12,21 @@ class TargetCapability(Base):
 
     __tablename__ = "target_capabilities"
     __table_args__ = (
-        UniqueConstraint(
-            "target_id",
-            "name",
-            name="uq_target_capability_name",
-        ),
+        UniqueConstraint("target_id", "name", name="uq_target_capability_name"),
     )
 
-    id: Mapped[str] = mapped_column(
-        String(36),
-        primary_key=True,
-        default=lambda: str(uuid.uuid4()),
-    )
-
-    target_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("targets.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    target_id: Mapped[str] = mapped_column(String(36), ForeignKey("targets.id", ondelete="CASCADE"), nullable=False, index=True)
+    agent_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agents.id", ondelete="SET NULL"), index=True)
+    resource_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agent_resources.id", ondelete="SET NULL"), index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-
-    capability_type: Mapped[str] = mapped_column(
-        String(32),
-        nullable=False,
-    )
-
+    capability_type: Mapped[str] = mapped_column(String(32), nullable=False)
     provider_key: Mapped[str | None] = mapped_column(String(100))
-
-    # Provider-specific hardware configuration. The Server stores the
-    # logical configuration; the Agent/provider interprets it when the
-    # capability is used. Examples: serial device path, J-Link serial,
-    # network address, or DD relay identifier.
     provider_config: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-
-    created_at: Mapped[DateTime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-    )
-
-    updated_at: Mapped[DateTime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-    )
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     target = relationship("Target", back_populates="capabilities")
+    agent = relationship("Agent")
+    resource = relationship("AgentResource")
