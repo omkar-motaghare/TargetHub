@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///targethub.db"
 
     secret_key: str
+    targethub_public_url: str = "http://localhost:8000"
 
     model_config = SettingsConfigDict(
         env_file=".env",
