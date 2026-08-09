@@ -45,7 +45,7 @@ class TargetCapability(Base):
     # logical configuration; the Agent/provider interprets it when the
     # capability is used. Examples: serial device path, J-Link serial,
     # network address, or DD relay identifier.
-    provider_config: Mapped[dict | None] = mapped_column(JSON, default=dict)
+    provider_config: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
