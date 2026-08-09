@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from app.core.exceptions import TargetHubException
+from app.core.exceptions import ConflictResource, ResourceNotFound
 from app.models.agent import Agent, AgentResource
 from app.repositories.agent_repository import AgentRepository
 
@@ -15,7 +15,7 @@ class AgentService:
     def get_agent(self, agent_id: str):
         agent = self.repository.get(agent_id)
         if not agent:
-            raise TargetHubException("Agent not found", status_code=404)
+            raise ResourceNotFound("Agent", agent_id)
         return agent
 
     def register(self, name: str, hostname: str | None):
@@ -32,7 +32,7 @@ class AgentService:
     def heartbeat(self, agent_id: str, hostname: str | None, resources):
         agent = self.get_agent(agent_id)
         if not agent.enabled:
-            raise TargetHubException("Agent is disabled", status_code=409)
+            raise ConflictResource("Agent is disabled")
         agent.hostname = hostname or agent.hostname
         agent.status = "online"
         agent.last_seen_at = datetime.now(timezone.utc)
