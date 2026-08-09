@@ -28,6 +28,23 @@
     <section id="targets" class="target-grid" aria-live="polite"></section>
 
     <section class="panel admin-panel">
+      <div class="panel-head"><div><p class="eyebrow">AGENT ADMINISTRATION</p><h2>Agents</h2></div><span class="muted">Create a one-time enrollment token, install the Agent, then monitor discovered resources.</span></div>
+      <form id="agent-form" class="form-grid agent-form">
+        <label>Agent name *<input id="agent-name" required maxlength="100" placeholder="lab-pi-01"></label>
+        <label>Deployment scenario *
+          <select id="agent-scenario" required>
+            <option value="same_linux">TargetHub + Agent on same Linux machine</option>
+            <option value="remote_raspberry_pi">TargetHub on Linux, Agent on remote Raspberry Pi</option>
+            <option value="raspberry_pi_all_in_one">TargetHub + Agent on one Raspberry Pi</option>
+          </select>
+        </label>
+        <div class="wide form-actions"><button type="submit" class="primary">Create enrollment</button></div>
+      </form>
+      <div id="enrollment-result" class="enrollment-result hidden"></div>
+      <div class="table-wrap"><table><thead><tr><th>Name</th><th>Hostname</th><th>Status</th><th>Resources</th><th>Last seen</th><th>Actions</th></tr></thead><tbody id="agents"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody></table></div>
+    </section>
+
+    <section class="panel admin-panel">
       <div class="panel-head"><div><p class="eyebrow">ADMINISTRATION</p><h2>Manage targets</h2></div><span class="muted">Team administrators configure targets and select physical resources discovered by an Agent.</span></div>
       <form id="target-form" class="form-grid">
         <input type="hidden" id="target-id">
