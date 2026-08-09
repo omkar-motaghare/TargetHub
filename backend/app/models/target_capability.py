@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -40,6 +40,12 @@ class TargetCapability(Base):
     )
 
     provider_key: Mapped[str | None] = mapped_column(String(100))
+
+    # Provider-specific hardware configuration. The Server stores the
+    # logical configuration; the Agent/provider interprets it when the
+    # capability is used. Examples: serial device path, J-Link serial,
+    # network address, or DD relay identifier.
+    provider_config: Mapped[dict | None] = mapped_column(JSON, default=dict)
 
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
