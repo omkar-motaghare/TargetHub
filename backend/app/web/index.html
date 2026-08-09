@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TargetHub</title>
+  <link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">TH</span><div><strong>TargetHub</strong><small>Embedded Lab Control</small></div></div>
+    <div class="identity"><span class="status-dot"></span> Local instance <strong id="user-label">developer</strong></div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <div><p class="eyebrow">LAB DASHBOARD</p><h1>Targets</h1><p>See availability and reservations before accessing shared hardware.</p></div>
+      <button class="secondary" id="refresh">Refresh</button>
+    </section>
+
+    <section class="stats">
+      <div class="stat"><span>Total targets</span><strong id="total">—</strong></div>
+      <div class="stat"><span>Available</span><strong id="available">—</strong></div>
+      <div class="stat"><span>Reserved</span><strong id="reserved">—</strong></div>
+    </section>
+
+    <section id="message" class="message hidden"></section>
+    <section id="targets" class="target-grid" aria-live="polite"></section>
+
+    <section class="panel">
+      <div class="panel-head"><div><p class="eyebrow">RESERVATIONS</p><h2>Current reservations</h2></div><span class="muted">Identity: developer</span></div>
+      <div class="table-wrap"><table><thead><tr><th>Target</th><th>User</th><th>Starts</th><th>Ends</th><th>Status</th></tr></thead><tbody id="reservations"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody></table></div>
+    </section>
+  </main>
+
+  <script src="/web/app.js"></script>
+</body>
+</html>
