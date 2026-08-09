@@ -2,6 +2,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from app.core.exceptions import (
+    AuthenticationError,
     ConflictResource,
     DuplicateResource,
     ResourceNotFound,
@@ -16,6 +17,13 @@ async def targethub_exception_handler(
     if isinstance(exc, ResourceNotFound):
         return JSONResponse(
             status_code=404,
+            content={"detail": str(exc)},
+        )
+
+    if isinstance(exc, AuthenticationError):
+        return JSONResponse(
+            status_code=401,
+            headers={"WWW-Authenticate": "Bearer"},
             content={"detail": str(exc)},
         )
 
