@@ -1,5 +1,6 @@
 from app.core.exceptions import DuplicateResource, ResourceNotFound
 from app.models.target import Target
+from app.models.target_capability import TargetCapability
 from app.repositories.target_repository import TargetRepository
 
 
@@ -19,12 +20,17 @@ class TargetService:
         return target
 
     def create_target(self, **kwargs):
-        existing = self.repository.get_by_name(kwargs["name"])
+        capabilities = kwargs.pop("capabilities", [])
 
+        existing = self.repository.get_by_name(kwargs["name"])
         if existing:
             raise DuplicateResource("Target", kwargs["name"])
 
-        return self.repository.create(Target(**kwargs))
+        target = Target(**kwargs)
+        target.capabilities = [
+            TargetCapability(**capability) for capability in capabilities
+        ]
+        return self.repository.create(target)
 
     def update_target(self, target_id: str, **kwargs):
         target = self.get_target(target_id)
