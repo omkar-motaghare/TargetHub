@@ -9,7 +9,7 @@
 <body>
   <header class="topbar">
     <div class="brand"><span class="brand-mark">TH</span><div><strong>TargetHub</strong><small>Embedded Lab Control</small></div></div>
-    <div class="identity"><span class="status-dot"></span> Local instance <strong id="user-label">developer</strong></div>
+    <div class="identity"><span class="status-dot"></span> Local instance <strong id="user-label">developer</strong> <span class="role-badge">TEAM ADMIN</span></div>
   </header>
 
   <main class="container">
@@ -27,9 +27,30 @@
     <section id="message" class="message hidden"></section>
     <section id="targets" class="target-grid" aria-live="polite"></section>
 
+    <section class="panel admin-panel">
+      <div class="panel-head"><div><p class="eyebrow">ADMINISTRATION</p><h2>Manage targets</h2></div><span class="muted">Team administrators configure targets and capabilities.</span></div>
+      <form id="target-form" class="form-grid">
+        <input type="hidden" id="target-id">
+        <label>Target name *<input id="target-name" required placeholder="BOARD-01"></label>
+        <label>Vendor<input id="target-vendor" placeholder="Vendor"></label>
+        <label>Board model<input id="target-model" placeholder="Model"></label>
+        <label>Serial number<input id="target-serial" placeholder="Board serial number"></label>
+        <label>Lab<input id="target-lab" placeholder="Dev Lab"></label>
+        <label>Location<input id="target-location" placeholder="Desk-01"></label>
+        <label class="wide">Description<textarea id="target-description" rows="2" placeholder="Development test board"></textarea></label>
+
+        <div class="wide capability-editor">
+          <div class="capability-head"><div><strong>Capabilities</strong><p class="muted">Choose the interfaces this target exposes. Provider configuration is stored with the capability and interpreted later by the Agent/provider.</p></div><button type="button" class="secondary" id="add-capability">+ Add capability</button></div>
+          <div id="capabilities"></div>
+        </div>
+
+        <div class="wide form-actions"><button type="submit" class="primary">Save target</button><button type="button" class="secondary hidden" id="cancel-edit">Cancel edit</button></div>
+      </form>
+    </section>
+
     <section class="panel">
       <div class="panel-head"><div><p class="eyebrow">RESERVATIONS</p><h2>Current reservations</h2></div><span class="muted">Identity: developer</span></div>
-      <div class="table-wrap"><table><thead><tr><th>Target</th><th>User</th><th>Starts</th><th>Ends</th><th>Status</th></tr></thead><tbody id="reservations"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Target</th><th>User</th><th>Starts</th><th>Ends</th><th>Status</th><th></th></tr></thead><tbody id="reservations"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody></table></div>
     </section>
   </main>
 
