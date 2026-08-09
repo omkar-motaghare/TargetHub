@@ -4,7 +4,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings
-from app.core.exceptions import ConflictResource, ResourceNotFound
+from app.core.exceptions import AuthenticationError, ConflictResource, ResourceNotFound
 from app.models.agent import Agent, AgentEnrollment, AgentResource
 from app.repositories.agent_repository import AgentRepository
 
@@ -61,7 +61,7 @@ class AgentService:
     def enroll(self, token: str, hostname: str | None):
         enrollment = self.repository.get_enrollment_by_token_hash(self._hash_secret(token))
         if not enrollment:
-            raise ConflictResource("Invalid enrollment token")
+            raise AuthenticationError("Invalid enrollment token")
         if enrollment.used_at is not None:
             raise ConflictResource("Enrollment token has already been used")
 
@@ -96,9 +96,9 @@ class AgentService:
     def authenticate_credential(self, credential: str):
         agent = self.repository.get_by_credential_hash(self._hash_secret(credential))
         if not agent or not agent.enabled:
-            raise ConflictResource("Invalid or disabled Agent credential")
+            raise AuthenticationError("Invalid or disabled Agent credential")
         if agent.credential_revoked_at is not None:
-            raise ConflictResource("Agent credential has been revoked")
+            raise AuthenticationError("Agent credential has been revoked")
         return agent
 
     def register(self, name: str, hostname: str | None):
