@@ -20,6 +20,11 @@ def upgrade() -> None:
         "target_capabilities",
         sa.Column("provider_config", sa.JSON(), nullable=True),
     )
+    op.execute(
+        "UPDATE target_capabilities SET provider_config = '{}' WHERE provider_config IS NULL"
+    )
+    with op.batch_alter_table("target_capabilities") as batch_op:
+        batch_op.alter_column("provider_config", nullable=False)
 
 
 def downgrade() -> None:
