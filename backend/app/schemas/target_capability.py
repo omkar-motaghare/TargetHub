@@ -5,8 +5,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class CapabilityType(StrEnum):
-    """Capability families recognized by the TargetHub architecture."""
-
     SERIAL = "serial"
     NETWORK = "network"
     SSH = "ssh"
@@ -20,6 +18,8 @@ class CapabilityType(StrEnum):
 class TargetCapabilityBase(BaseModel):
     name: str
     capability_type: CapabilityType
+    agent_id: str | None = None
+    resource_id: str | None = None
     provider_key: str | None = None
     provider_config: dict = Field(default_factory=dict)
     enabled: bool = True
@@ -32,6 +32,8 @@ class TargetCapabilityCreate(TargetCapabilityBase):
 class TargetCapabilityUpdate(BaseModel):
     name: str | None = None
     capability_type: CapabilityType | None = None
+    agent_id: str | None = None
+    resource_id: str | None = None
     provider_key: str | None = None
     provider_config: dict | None = None
     enabled: bool | None = None
