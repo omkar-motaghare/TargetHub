@@ -16,6 +16,63 @@ async function request(path, options = {}) {
   return body;
 }
 
+function deploymentScenarioLabel(value) {
+  return ({
+    same_linux: "Same Linux machine",
+    remote_raspberry_pi: "Remote Raspberry Pi",
+    raspberry_pi_all_in_one: "All-in-one Raspberry Pi",
+  })[value] || value;
+}
+
+function renderAgents(agents) {
+  $("agents").innerHTML = agents.length ? agents.map(agent => {
+    const status = agent.enabled ? (agent.status || "offline") : "disabled";
+    const resources = (agent.resources || []).filter(r => r.available).length;
+    const lastSeen = agent.last_seen_at ? new Date(agent.last_seen_at).toLocaleString() : "Never";
+    const actions = agent.enabled
+      ? `<button class="table-action" data-disable-agent="${esc(agent.id)}">Disable</button>`
+      : `<button class="table-action" data-enable-agent="${esc(agent.id)}">Enable</button>`;
+    const revoke = agent.credential_prefix ? `<button class="table-action danger-action" data-revoke-agent="${esc(agent.id)}">Revoke credential</button>` : "";
+    return `<tr><td><strong>${esc(agent.name)}</strong><div class="muted">${esc(agent.credential_prefix || "No credential")}</div></td><td>${esc(agent.hostname || "—")}</td><td><span class="badge ${status === "online" ? "available" : status === "disabled" ? "disabled" : "reserved"}">${esc(status)}</span></td><td>${resources}</td><td>${esc(lastSeen)}</td><td><div class="agent-actions">${actions}${revoke}</div></td></tr>`;
+  }).join("") : `<tr><td colspan="6" class="empty">No Agents enrolled yet.</td></tr>`;
+  document.querySelectorAll("button[data-disable-agent]").forEach(button => button.onclick = () => changeAgentState(button.dataset.disableAgent, "disable"));
+  document.querySelectorAll("button[data-enable-agent]").forEach(button => button.onclick = () => changeAgentState(button.dataset.enableAgent, "enable"));
+  document.querySelectorAll("button[data-revoke-agent]").forEach(button => button.onclick = () => revokeAgent(button.dataset.revokeAgent));
+}
+
+async function createAgentEnrollment(event) {
+  event.preventDefault();
+  try {
+    clearMessage();
+    const result = await request("/agents/enrollments", {
+      method: "POST",
+      body: JSON.stringify({ agent_name: $("agent-name").value.trim(), deployment_scenario: $("agent-scenario").value })
+    });
+    $("enrollment-result").innerHTML = `<div><strong>Enrollment created for ${esc(result.agent_name)}</strong><p class="muted">Scenario: ${esc(deploymentScenarioLabel(result.deployment_scenario))}. Token expires ${esc(new Date(result.expires_at).toLocaleString())} and can be used once.</p></div><label>One-time enrollment token<input readonly value="${esc(result.token)}" id="enrollment-token"></label><label class="wide">Installation command<textarea readonly rows="3" id="install-command">${esc(result.install_command)}</textarea></label><div class="form-actions"><button type="button" class="secondary" id="copy-install">Copy installation command</button></div>`;
+    $("enrollment-result").classList.remove("hidden");
+    $("agent-form").reset();
+    $("copy-install").onclick = async () => {
+      await navigator.clipboard.writeText(result.install_command);
+      showMessage("Installation command copied to clipboard.");
+    };
+    await loadAgents();
+  } catch (error) { showMessage(error.message); }
+}
+
+async function loadAgents() {
+  AGENTS = await request("/agents");
+  renderAgents(AGENTS);
+}
+
+async function changeAgentState(agentId, action) {
+  try { clearMessage(); await request(`/agents/${agentId}/${action}`, { method: "POST" }); await loadAgents(); showMessage(`Agent ${action}d successfully.`); } catch (error) { showMessage(error.message); }
+}
+
+async function revokeAgent(agentId) {
+  if (!window.confirm("Revoke this Agent credential? The Agent will stop authenticating until it is enrolled again.")) return;
+  try { clearMessage(); await request(`/agents/${agentId}/revoke-credential`, { method: "POST" }); await loadAgents(); showMessage("Agent credential revoked."); } catch (error) { showMessage(error.message); }
+}
+
 function statusFor(target, reservations) {
   if (target.enabled === false) return "disabled";
   const active = reservations.find(r => r.target_id === target.id && r.status === "active");
@@ -151,12 +208,13 @@ async function load() {
   try {
     clearMessage();
     const [targets, reservations, agents] = await Promise.all([request("/targets"), request("/reservations"), request("/agents")]);
-    AGENTS = agents; renderTargets(targets, reservations); renderReservations(reservations, targets);
-    if (!AGENTS.length) showMessage("No TargetHub Agents are registered yet. Register an Agent to configure physical resources.");
+    AGENTS = agents; renderAgents(agents); renderTargets(targets, reservations); renderReservations(reservations, targets);
+    if (!AGENTS.length) showMessage("No TargetHub Agents are registered yet. Create an enrollment above to install one.");
   } catch (error) { showMessage(`Unable to load TargetHub data: ${error.message}`); $("targets").innerHTML = ""; }
 }
 
 $("refresh").addEventListener("click", load);
+$("agent-form").addEventListener("submit", createAgentEnrollment);
 $("target-form").addEventListener("submit", saveTarget);
 $("add-capability").addEventListener("click", () => addCapability());
 $("cancel-edit").addEventListener("click", resetTargetForm);
