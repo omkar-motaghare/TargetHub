@@ -16,6 +16,7 @@ services:
       LOG_LEVEL: INFO
       DATABASE_URL: sqlite:////data/targethub.db
       SECRET_KEY: ${SECRET_KEY:-targethub-dev-only-change-me}
+      TARGETHUB_PUBLIC_URL: ${TARGETHUB_PUBLIC_URL:-http://localhost:8000}
     volumes:
       - targethub_data:/data
 
