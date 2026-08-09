@@ -8,6 +8,18 @@ from app.repositories.session_repository import SessionRepository
 from app.repositories.target_repository import TargetRepository
 
 
+def _as_utc(value: datetime) -> datetime:
+    """Return a timezone-aware UTC datetime.
+
+    SQLite commonly returns DATETIME values without timezone information even
+    when the application supplied timezone-aware values. Treat naive values as
+    UTC so reservation/session comparisons remain safe and deterministic.
+    """
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 class SessionService:
     """Authorizes target access by binding a session to an active reservation."""
 
@@ -40,9 +52,12 @@ class SessionService:
             raise ResourceNotFound("Reservation", reservation_id)
         if reservation.user_id != user_id:
             raise ConflictResource("Only the reservation owner can open a session")
-        if reservation.status != "active" or reservation.ends_at <= now:
+
+        reservation_starts_at = _as_utc(reservation.starts_at)
+        reservation_ends_at = _as_utc(reservation.ends_at)
+        if reservation.status != "active" or reservation_ends_at <= now:
             raise ConflictResource("Reservation is not active")
-        if reservation.starts_at > now:
+        if reservation_starts_at > now:
             raise ConflictResource("Reservation has not started yet")
 
         target = self.target_repository.get(reservation.target_id)
@@ -72,7 +87,7 @@ class SessionService:
             capability_type=capability_type,
             provider_key=capability.provider_key,
             status="active",
-            expires_at=reservation.ends_at,
+            expires_at=reservation_ends_at,
         )
         return self.repository.create(session)
 
