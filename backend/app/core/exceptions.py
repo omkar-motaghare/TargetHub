@@ -21,3 +21,10 @@ class ConflictResource(TargetHubException):
 
     def __init__(self, message: str):
         super().__init__(message)
+
+
+class AuthenticationError(TargetHubException):
+    """Raised when an Agent credential cannot authenticate a request."""
+
+    def __init__(self, message: str = "Authentication required"):
+        super().__init__(message)
