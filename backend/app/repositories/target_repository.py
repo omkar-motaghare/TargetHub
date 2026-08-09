@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.target import Target
 
@@ -8,10 +8,19 @@ class TargetRepository:
         self.db = db
 
     def list(self):
-        return self.db.query(Target).all()
+        return (
+            self.db.query(Target)
+            .options(selectinload(Target.capabilities))
+            .all()
+        )
 
     def get(self, target_id: str):
-        return self.db.query(Target).filter(Target.id == target_id).first()
+        return (
+            self.db.query(Target)
+            .options(selectinload(Target.capabilities))
+            .filter(Target.id == target_id)
+            .first()
+        )
 
     def get_by_name(self, name: str):
         return self.db.query(Target).filter(Target.name == name).first()
