@@ -5,7 +5,6 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key")
 
 import pytest
 
-from app.models.agent import Agent
 from app.services.agent_service import AgentService
 
 
@@ -110,6 +109,17 @@ def test_multiple_agents_can_enroll_from_the_same_host():
     assert service.authenticate_credential(credential_b) is agent_b
     assert enrollment_a.agent_id == agent_a.id
     assert enrollment_b.agent_id == agent_b.id
+
+
+def test_duplicate_agent_name_is_rejected():
+    repository = FakeRepository()
+    service = AgentService(repository)
+
+    enrollment, token = service.create_enrollment("linux-01", "same_linux")
+    service.enroll(token, "linux-host", "linux")
+
+    with pytest.raises(Exception, match="already registered"):
+        service.create_enrollment("linux-01", "same_linux")
 
 
 def test_raspberry_pi_enrollment_is_rejected_on_linux_host():
