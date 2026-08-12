@@ -22,8 +22,18 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
+if [[ "$(uname -s)" != "Linux" ]]; then
+  echo "TargetHub Agent currently supports Linux hosts only." >&2
+  exit 1
+fi
+
 if ! command -v python3 >/dev/null 2>&1; then
   echo "python3 is required." >&2
+  exit 1
+fi
+
+if ! command -v curl >/dev/null 2>&1; then
+  echo "curl is required." >&2
   exit 1
 fi
 
@@ -45,7 +55,7 @@ curl -fsSL "${TARGETHUB_URL%/}/web/agent/targethub_agent.py" -o "$BASE_DIR/targe
 chmod 0755 "$BASE_DIR/targethub_agent.py"
 
 # Each enrollment gets its own config and systemd instance. This allows multiple
-# independent Agents to run on the same physical Linux host or Raspberry Pi.
+# independent Agents to run side-by-side on the same Linux host, including Raspberry Pi.
 if [[ ! -f "$CONFIG_PATH" ]] || ! grep -q '"agent_id"' "$CONFIG_PATH"; then
   cat > "$CONFIG_PATH" <<EOF
 {
@@ -83,4 +93,4 @@ echo "TargetHub Agent instance installed and started: $SERVICE_NAME"
 echo "Config: $CONFIG_PATH"
 echo "Check status with: systemctl status $SERVICE_NAME"
 echo "View logs with:   journalctl -u $SERVICE_NAME -f"
-echo "Multiple Agent enrollments can run side-by-side on this host."
+echo "Multiple Agent enrollments can run side-by-side on this Linux host."
