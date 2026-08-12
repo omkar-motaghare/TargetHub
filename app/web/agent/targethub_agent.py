@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Small dependency-free TargetHub Agent runtime for Linux and Raspberry Pi."""
+"""Small dependency-free TargetHub Agent runtime for Linux hosts."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
-import platform as host_platform
 import socket
 import sys
 import time
@@ -50,22 +49,9 @@ def api_request(url: str, payload: dict, headers: dict | None = None) -> dict:
         raise RuntimeError(f"Unable to reach TargetHub: {exc.reason}") from exc
 
 
-def detect_platform() -> str:
-    """Return the deployment platform expected by TargetHub enrollment."""
-    compatible_paths = (
-        Path("/proc/device-tree/compatible"),
-        Path("/sys/firmware/devicetree/base/compatible"),
-    )
-    for path in compatible_paths:
-        try:
-            if b"raspberrypi" in path.read_bytes().lower():
-                return "raspberry_pi"
-        except (OSError, PermissionError):
-            continue
-
-    if host_platform.system().lower() == "linux":
-        return "linux"
-    return "linux"
+def ensure_linux() -> None:
+    if sys.platform != "linux":
+        raise RuntimeError("TargetHub Agent currently supports Linux hosts only")
 
 
 def discover_resources(config: dict) -> list[dict]:
@@ -122,12 +108,10 @@ def enroll(config: dict, config_path: Path) -> None:
         {
             "token": token,
             "hostname": socket.gethostname(),
-            "platform": detect_platform(),
         },
     )
     config["agent_id"] = result["agent"]["id"]
     config["credential"] = result["credential"]
-    config["platform"] = detect_platform()
     config.pop("enrollment_token", None)
     save_config(config_path, config)
     print(f"Enrolled Agent {config['agent_id']}")
@@ -148,6 +132,7 @@ def heartbeat(config: dict) -> None:
 
 
 def main() -> int:
+    ensure_linux()
     parser = argparse.ArgumentParser(description="TargetHub Agent")
     parser.add_argument("--config", default="/etc/targethub-agent/config.json")
     args = parser.parse_args()
