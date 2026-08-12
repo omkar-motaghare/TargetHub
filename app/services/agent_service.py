@@ -85,12 +85,15 @@ class AgentService:
         return agent
 
     def create_enrollment(self, agent_name: str, deployment_scenario: str):
-        if not agent_name.strip():
+        agent_name = agent_name.strip()
+        if not agent_name:
             raise ConflictResource("Agent name is required")
+        if self.repository.get_by_name(agent_name) is not None:
+            raise ConflictResource(f"Agent name '{agent_name}' is already registered")
 
         token = self._new_secret("enroll")
         enrollment = AgentEnrollment(
-            agent_name=agent_name.strip(),
+            agent_name=agent_name,
             deployment_scenario=deployment_scenario,
             token_hash=self._hash_secret(token),
             expires_at=self._now() + timedelta(minutes=ENROLLMENT_TTL_MINUTES),
