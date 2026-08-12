@@ -2,12 +2,12 @@
 
 ## What is implemented
 
-TargetHub now provides the complete first-version Agent enrollment lifecycle:
+TargetHub provides the first-version Agent enrollment lifecycle:
 
 1. Team Admin creates an Agent enrollment from the Web UI.
 2. TargetHub creates a 30-minute, single-use enrollment token.
 3. The UI displays a copyable installation command.
-4. The installer downloads the dependency-free Agent runtime and creates a systemd service.
+4. The installer downloads the dependency-free Agent runtime and creates a systemd instance.
 5. The Agent exchanges the enrollment token for a long-lived Agent credential.
 6. The token is removed from the Agent configuration after successful enrollment.
 7. The Agent sends authenticated heartbeats every 15 seconds by default.
@@ -15,50 +15,19 @@ TargetHub now provides the complete first-version Agent enrollment lifecycle:
 9. Team Admin can see Agent status and resources in the Web UI.
 10. Team Admin can disable/enable an Agent or revoke its credential.
 11. Agents with no heartbeat for more than 45 seconds are shown as offline.
+12. Multiple independent Agents can run on the same Linux host.
 
-The raw enrollment token and raw Agent credential are never returned by Agent listing APIs. Each secret is displayed only at the point where it is issued.
+## Platform requirement
 
-## Deployment scenarios
+The Agent is intended for **Linux-based machines**. TargetHub does not require the administrator to declare whether the host is a Raspberry Pi, PC, server, VM, or another Linux system.
 
-### Scenario 1: TargetHub and Agent on the same Linux machine
+The installer checks that it is running on Linux. The Agent runtime performs the same check before starting.
 
-Set `TARGETHUB_PUBLIC_URL` to a URL reachable by the Agent. For a Docker deployment where the Agent runs on the host, use the host's LAN address rather than `localhost` if the Agent must reach the published container port through the host network.
+## Agent enrollment
 
-Example:
+Open the **Agents** administration section, enter a unique Agent name, and choose **Create enrollment**. There is no deployment-scenario selection.
 
-```text
-TARGETHUB_PUBLIC_URL=http://192.168.1.50:8000
-```
-
-Open `/dashboard`, choose **Create enrollment**, select **TargetHub + Agent on same Linux machine**, and run the generated command on that Linux host.
-
-### Scenario 2: TargetHub on Linux, Agent on remote Raspberry Pi
-
-Set `TARGETHUB_PUBLIC_URL` to the TargetHub server's LAN address or DNS name reachable from the Raspberry Pi.
-
-Example:
-
-```text
-TARGETHUB_PUBLIC_URL=http://192.168.1.50:8000
-```
-
-Create an enrollment for **TargetHub on Linux, Agent on remote Raspberry Pi**. Copy the generated command and run it on the Pi. The Pi initiates all Agent traffic outbound to TargetHub; TargetHub does not need inbound access to the Pi for heartbeat operation.
-
-### Scenario 3: TargetHub and Agent on one Raspberry Pi
-
-Set `TARGETHUB_PUBLIC_URL` to the Raspberry Pi's LAN address so that both local and remote administrators can use the same generated configuration.
-
-Example:
-
-```text
-TARGETHUB_PUBLIC_URL=http://192.168.1.80:8000
-```
-
-Create an enrollment for **TargetHub + Agent on one Raspberry Pi** and run the generated command on that Pi.
-
-## Agent installation
-
-The generated command has this form:
+Run the generated command on the Linux machine that should host that Agent:
 
 ```bash
 curl -fsSL http://<targethub>/web/agent/install.sh | sudo bash -s -- \
@@ -66,19 +35,50 @@ curl -fsSL http://<targethub>/web/agent/install.sh | sudo bash -s -- \
   --enrollment-token '<one-time-token>'
 ```
 
-The installer:
+The same command shape works whether the Linux host is:
 
-- requires Python 3 and curl;
-- installs the Agent under `/opt/targethub-agent`;
-- stores configuration under `/etc/targethub-agent/config.json` with mode `0600`;
-- creates `targethub-agent.service`;
-- enables and starts the service.
+- the machine running TargetHub;
+- a remote Linux server;
+- a Raspberry Pi;
+- a Linux VM; or
+- another supported Linux-based embedded computer.
 
-Check the Agent with:
+The administrator does not need to tell TargetHub which hardware class was selected. The Agent reports its hostname and discovered resources after enrollment.
+
+## Multiple Agents on one Linux machine
+
+Multiple enrollments can be installed on the same physical Linux host. Each enrollment receives a unique instance identifier derived from its one-time token and gets its own configuration and systemd service:
+
+```text
+/etc/targethub-agent/<instance>.json
+targethub-agent@<instance>.service
+```
+
+For example:
 
 ```bash
-systemctl status targethub-agent
-journalctl -u targethub-agent -f
+systemctl list-units 'targethub-agent@*'
+```
+
+Each Agent has an independent credential and resource inventory.
+
+## Agent installation
+
+The installer:
+
+- requires root privileges;
+- requires a Linux-based host;
+- requires Python 3, curl, and `sha256sum`;
+- installs the Agent under `/opt/targethub-agent`;
+- stores per-enrollment configuration under `/etc/targethub-agent/` with mode `0600`;
+- creates the templated `targethub-agent@.service`;
+- enables and starts the specific enrollment instance.
+
+Check an instance with:
+
+```bash
+systemctl status targethub-agent@<instance>
+journalctl -u targethub-agent@<instance> -f
 ```
 
 ## Resource discovery
@@ -111,6 +111,4 @@ Agent credential:
 
 ## Operational recovery
 
-If an Agent credential is revoked, create a new enrollment for the same Agent name and run the new installation command on the Agent host. The existing Agent identity is reused and receives a new credential.
-
-If an enrollment token expires or is consumed, create another enrollment rather than reusing the old token.
+If an Agent credential is revoked, create a new enrollment with a new Agent name if you want a new Agent identity. If an enrollment token expires or is consumed, create another enrollment rather than reusing the old token.

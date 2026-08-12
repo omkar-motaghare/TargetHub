@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Small dependency-free TargetHub Agent runtime for Linux and Raspberry Pi."""
+"""Small dependency-free TargetHub Agent runtime for supported Linux hosts."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import platform
 import socket
 import sys
 import time
@@ -124,6 +125,9 @@ def heartbeat(config: dict) -> None:
 
 
 def main() -> int:
+    if platform.system() != "Linux":
+        raise RuntimeError("TargetHub Agent requires a Linux-based machine")
+
     parser = argparse.ArgumentParser(description="TargetHub Agent")
     parser.add_argument("--config", default="/etc/targethub-agent/config.json")
     args = parser.parse_args()
@@ -141,7 +145,7 @@ def main() -> int:
     while True:
         try:
             heartbeat(config)
-        except Exception as exc:  # keep the service alive through transient network failures
+        except Exception as exc:
             print(f"heartbeat error: {exc}", file=sys.stderr)
         time.sleep(interval)
 

@@ -50,7 +50,6 @@ class AgentEnrollment(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     agent_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    deployment_scenario: Mapped[str] = mapped_column(String(32), nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -16,14 +16,6 @@ async function request(path, options = {}) {
   return body;
 }
 
-function deploymentScenarioLabel(value) {
-  return ({
-    same_linux: "Same Linux machine",
-    remote_raspberry_pi: "Remote Raspberry Pi",
-    raspberry_pi_all_in_one: "All-in-one Raspberry Pi",
-  })[value] || value;
-}
-
 function renderAgents(agents) {
   $("agents").innerHTML = agents.length ? agents.map(agent => {
     const status = agent.enabled ? (agent.status || "offline") : "disabled";
@@ -46,9 +38,9 @@ async function createAgentEnrollment(event) {
     clearMessage();
     const result = await request("/agents/enrollments", {
       method: "POST",
-      body: JSON.stringify({ agent_name: $("agent-name").value.trim(), deployment_scenario: $("agent-scenario").value })
+      body: JSON.stringify({ agent_name: $("agent-name").value.trim() })
     });
-    $("enrollment-result").innerHTML = `<div><strong>Enrollment created for ${esc(result.agent_name)}</strong><p class="muted">Scenario: ${esc(deploymentScenarioLabel(result.deployment_scenario))}. Token expires ${esc(new Date(result.expires_at).toLocaleString())} and can be used once.</p></div><label>One-time enrollment token<input readonly value="${esc(result.token)}" id="enrollment-token"></label><label class="wide">Installation command<textarea readonly rows="3" id="install-command">${esc(result.install_command)}</textarea></label><div class="form-actions"><button type="button" class="secondary" id="copy-install">Copy installation command</button></div>`;
+    $("enrollment-result").innerHTML = `<div><strong>Enrollment created for ${esc(result.agent_name)}</strong><p class="muted">Run the installation command on any supported Linux machine. The token expires ${esc(new Date(result.expires_at).toLocaleString())} and can be used once.</p></div><label>One-time enrollment token<input readonly value="${esc(result.token)}" id="enrollment-token"></label><label class="wide">Installation command<textarea readonly rows="3" id="install-command">${esc(result.install_command)}</textarea></label><div class="form-actions"><button type="button" class="secondary" id="copy-install">Copy installation command</button></div>`;
     $("enrollment-result").classList.remove("hidden");
     $("agent-form").reset();
     $("copy-install").onclick = async () => {

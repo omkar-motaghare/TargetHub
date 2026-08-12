@@ -32,13 +32,11 @@ class AgentCreate(BaseModel):
 
 class AgentEnrollmentCreate(BaseModel):
     agent_name: str = Field(min_length=1, max_length=100)
-    deployment_scenario: str = Field(pattern="^(same_linux|remote_raspberry_pi|raspberry_pi_all_in_one)$")
 
 
 class AgentEnrollmentResponse(BaseModel):
     id: str
     agent_name: str
-    deployment_scenario: str
     expires_at: datetime
     used_at: datetime | None
     agent_id: str | None

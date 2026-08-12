@@ -62,14 +62,16 @@ class AgentService:
         self._refresh_liveness([agent])
         return agent
 
-    def create_enrollment(self, agent_name: str, deployment_scenario: str):
-        if not agent_name.strip():
+    def create_enrollment(self, agent_name: str):
+        agent_name = agent_name.strip()
+        if not agent_name:
             raise ConflictResource("Agent name is required")
+        if self.repository.get_by_name(agent_name) is not None:
+            raise ConflictResource(f"Agent name '{agent_name}' is already registered")
 
         token = self._new_secret("enroll")
         enrollment = AgentEnrollment(
-            agent_name=agent_name.strip(),
-            deployment_scenario=deployment_scenario,
+            agent_name=agent_name,
             token_hash=self._hash_secret(token),
             expires_at=self._now() + timedelta(minutes=ENROLLMENT_TTL_MINUTES),
         )
@@ -90,16 +92,20 @@ class AgentService:
             raise ConflictResource("Enrollment token has expired")
 
         agent = self.repository.get_by_name(enrollment.agent_name)
-        if agent is None:
-            agent = Agent(name=enrollment.agent_name)
-            self.repository.create(agent)
+        if agent is not None:
+            raise ConflictResource(f"Agent name '{enrollment.agent_name}' is already registered")
+
+        agent = Agent(
+            name=enrollment.agent_name,
+            hostname=hostname,
+            status="online",
+            enabled=True,
+            last_seen_at=self._now(),
+        )
+        self.repository.create(agent)
 
         credential = self._new_secret("agent")
         now = self._now()
-        agent.hostname = hostname or agent.hostname
-        agent.status = "online"
-        agent.enabled = True
-        agent.last_seen_at = now
         agent.credential_hash = self._hash_secret(credential)
         agent.credential_prefix = credential[:12]
         agent.credential_created_at = now

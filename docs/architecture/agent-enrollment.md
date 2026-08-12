@@ -2,13 +2,11 @@
 
 ## Purpose
 
-This document records the operator-friendly Agent enrollment flow and maps it onto the Agent implementation in TargetHub. The goal is that a Team Admin can add an Agent from the TargetHub Web UI without manually creating database records or guessing internal Agent IDs.
+This document records the operator-friendly Agent enrollment flow. A Team Admin creates an Agent identity from the TargetHub Web UI, receives a short-lived installation command, and runs it on any supported Linux machine.
 
-## Current implementation status
+## Current implementation
 
-The first complete enrollment implementation is now present on `develop`.
-
-Implemented components include:
+The enrollment lifecycle provides:
 
 - Agent identity and resource inventory persistence.
 - Short-lived, single-use enrollment tokens stored as keyed hashes.
@@ -16,29 +14,57 @@ Implemented components include:
 - Authenticated heartbeat using `Authorization: Bearer` credentials.
 - Agent disable/enable and credential revocation.
 - Web UI Agent administration and enrollment instructions.
-- Dependency-free Linux/Raspberry Pi Agent runtime.
+- Dependency-free Linux Agent runtime.
 - One-command installation through the TargetHub-hosted installer.
 - Automatic serial/network resource discovery plus custom resource configuration.
-- Deployment documentation for all three supported physical layouts.
+- Multiple independent Agent instances on the same Linux host.
 
 ## Enrollment flow
 
-The Web UI exposes an **Agents** administration area. A Team Admin selects **Create enrollment**, supplies a human-readable Agent name and deployment scenario, and TargetHub generates a short-lived, single-use enrollment token.
+The Web UI exposes an **Agents** administration area. A Team Admin supplies only a human-readable Agent name. TargetHub generates a short-lived, single-use enrollment token and a copyable installation command.
 
-The UI presents a copyable installation command. The administrator runs it on the desired Linux or Raspberry Pi host. The Agent connects outbound to TargetHub, exchanges the enrollment token for a long-lived Agent credential, stores the credential locally, removes the enrollment token, and begins its heartbeat loop.
+The administrator may run that command on any supported Linux machine. The Agent connects outbound to TargetHub, exchanges the enrollment token for a long-lived Agent credential, stores the credential locally, removes the enrollment token, and begins its heartbeat loop.
 
 The normal lifecycle is:
 
 1. Team Admin opens **Agents → Create enrollment**.
-2. Admin gives the Agent a human-readable name and selects the intended deployment scenario.
+2. Admin gives the Agent a human-readable name.
 3. TargetHub creates a pending enrollment and a one-time, expiring enrollment token.
-4. UI shows copyable installation/configuration instructions.
+4. UI shows copyable installation instructions.
 5. Agent starts and calls the enrollment endpoint with the token and local hostname.
-6. TargetHub validates the token, binds the Agent identity to the enrollment, consumes the token, and returns the Agent credential.
+6. TargetHub validates the token, consumes it, and returns the Agent credential.
 7. Agent stores the credential locally and starts its heartbeat loop.
 8. TargetHub authenticates the heartbeat and updates discovered resources.
 9. Web UI shows Agent status and resources.
 10. Team Admin can disable/enable the Agent or revoke its credential.
+
+## Platform policy
+
+TargetHub does **not** bind an Agent to Raspberry Pi, x86 Linux, or another specific hardware class. The only platform requirement for the current Agent runtime is a supported Linux-based machine.
+
+Examples include:
+
+- Ubuntu/Debian workstation or server.
+- Raspberry Pi running Raspberry Pi OS or another supported Linux distribution.
+- Linux virtual machine.
+- Other Linux-based embedded computers.
+
+The Agent reports its hostname and discovered resources. Hardware identity is inferred from what the Agent can actually access rather than from an enrollment dropdown.
+
+## Multiple Agents on one host
+
+Each enrollment gets its own systemd instance and configuration derived from the enrollment token. Therefore multiple Agents may run independently on the same Linux machine, even though they share the same hostname.
+
+For example:
+
+```text
+Linux host
+├── Agent lab-agent-01
+├── Agent lab-agent-02
+└── Agent lab-agent-03
+```
+
+Each Agent has its own credential, heartbeat process, configuration, and resource inventory.
 
 ## Security properties
 
@@ -49,28 +75,6 @@ The normal lifecycle is:
 - Disabled/revoked Agents are rejected by authenticated heartbeat calls.
 - Heartbeat requires a valid Agent credential and verifies that the credential belongs to the URL Agent ID.
 - The Agent makes outbound connections to TargetHub; TargetHub does not require inbound connectivity to the Agent for normal heartbeat operation.
-
-## Deployment scenarios
-
-### Scenario 1 — TargetHub and Agent on the same Linux machine
-
-The team runs the main TargetHub application and Agent runtime on one Linux host. The Team Admin creates the enrollment in the Web UI and runs the generated installer command on that host.
-
-The configured `TARGETHUB_PUBLIC_URL` must be reachable by the Agent. For Docker on a Linux host, use the host's LAN address when `localhost` would not resolve to the published TargetHub port from the Agent process.
-
-### Scenario 2 — TargetHub on Linux, Agent on a remote Raspberry Pi
-
-The main TargetHub application runs on a Linux server while hardware is physically/network-wise closer to a Raspberry Pi.
-
-The Team Admin creates an enrollment and selects the remote Raspberry Pi scenario. The Pi runs only the Agent runtime and initiates outbound connections to TargetHub. Heartbeats report the Pi hostname and discovered hardware/resources.
-
-The TargetHub server therefore does not need to reach into the remote lab network merely to keep an Agent connected.
-
-### Scenario 3 — TargetHub and Agent on one Raspberry Pi
-
-The team uses a Raspberry Pi as the complete local TargetHub installation and Agent host.
-
-The Team Admin accesses the Web UI from another workstation on the LAN, creates the enrollment, and runs the generated command on the Pi. TargetHub and Agent use the same enrollment and authentication protocol as the other scenarios.
 
 ## Mapping to the implementation
 
@@ -87,16 +91,7 @@ The Team Admin accesses the Web UI from another workstation on the LAN, creates 
 | Web UI | `backend/app/web/index.html` and `app.js` | Implemented |
 | Agent runtime | `backend/app/web/agent/targethub_agent.py` | Implemented |
 | Installation | `backend/app/web/agent/install.sh` | Implemented |
-| Deployment documentation | `docs/agents/agent-operations.md` | Implemented |
-
-## Recommended extension points
-
-The enrollment protocol should remain stable as hardware-specific functionality grows. Future Agent work can add richer discovery providers for JTAG/debuggers, power controllers, USB instruments, network-controlled devices, and vendor-specific hardware without changing the enrollment lifecycle.
-
-Likewise, a future authenticated Team Admin identity system should protect the administrative enrollment/disable/revoke endpoints. The current Web UI still represents the project's development-mode local administrator identity and should not be treated as production authentication.
 
 ## Important design decision
 
-The Team Admin configures an Agent's identity and deployment from the TargetHub Web UI, but the Web UI does **not** ask the administrator to manually enter hardware resources. Hardware/resource discovery belongs to the Agent. The Agent discovers and reports what is actually available.
-
-The three deployment scenarios share one enrollment protocol. The difference is only where the TargetHub server and Agent runtime are physically deployed.
+The Team Admin configures an Agent's identity from the TargetHub Web UI, but does **not** select a hardware or deployment scenario. Hardware/resource discovery belongs to the Agent. The Agent discovers and reports what is actually available on its Linux host.

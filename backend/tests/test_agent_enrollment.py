@@ -51,13 +51,13 @@ def test_enrollment_is_single_use_and_credential_authenticates():
     repository = FakeRepository()
     service = AgentService(repository)
 
-    enrollment, token = service.create_enrollment("pi-01", "remote_raspberry_pi")
+    enrollment, token = service.create_enrollment("agent-01")
     assert token
     assert enrollment.used_at is None
     assert enrollment.token_hash != token
 
     agent, credential = service.enroll(token, "raspberrypi")
-    assert agent.name == "pi-01"
+    assert agent.name == "agent-01"
     assert agent.hostname == "raspberrypi"
     assert credential.startswith("agent_")
     assert agent.credential_hash != credential
@@ -73,18 +73,45 @@ def test_expired_enrollment_is_rejected():
     repository = FakeRepository()
     service = AgentService(repository)
 
-    enrollment, token = service.create_enrollment("pi-expired", "raspberry_pi_all_in_one")
+    enrollment, token = service.create_enrollment("agent-expired")
     enrollment.expires_at = enrollment.expires_at - timedelta(days=1)
 
     with pytest.raises(Exception, match="expired"):
-        service.enroll(token, "raspberrypi")
+        service.enroll(token, "linux-host")
+
+
+def test_duplicate_agent_name_is_rejected():
+    repository = FakeRepository()
+    service = AgentService(repository)
+
+    first_enrollment, first_token = service.create_enrollment("agent-duplicate")
+    service.enroll(first_token, "linux-host-01")
+
+    with pytest.raises(Exception, match="already registered"):
+        service.create_enrollment("agent-duplicate")
+
+
+def test_multiple_agents_can_share_the_same_linux_host():
+    repository = FakeRepository()
+    service = AgentService(repository)
+
+    first_enrollment, first_token = service.create_enrollment("agent-linux-01")
+    second_enrollment, second_token = service.create_enrollment("agent-linux-02")
+
+    first_agent, first_credential = service.enroll(first_token, "linux-host")
+    second_agent, second_credential = service.enroll(second_token, "linux-host")
+
+    assert first_agent.id != second_agent.id
+    assert first_agent.hostname == second_agent.hostname == "linux-host"
+    assert first_credential != second_credential
+    assert len(repository.agents) == 2
 
 
 def test_disabled_agent_cannot_authenticate():
     repository = FakeRepository()
     service = AgentService(repository)
 
-    enrollment, token = service.create_enrollment("linux-01", "same_linux")
+    enrollment, token = service.create_enrollment("linux-01")
     agent, credential = service.enroll(token, "linux-host")
     service.disable(agent.id)
 

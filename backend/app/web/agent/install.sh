@@ -22,19 +22,35 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
+if [[ "$(uname -s)" != "Linux" ]]; then
+  echo "TargetHub Agent requires a Linux-based machine." >&2
+  exit 1
+fi
+
 if ! command -v python3 >/dev/null 2>&1; then
   echo "python3 is required." >&2
   exit 1
 fi
 
+if ! command -v sha256sum >/dev/null 2>&1; then
+  echo "sha256sum is required." >&2
+  exit 1
+fi
+
 BASE_DIR="/opt/targethub-agent"
 CONFIG_DIR="/etc/targethub-agent"
+UNIT_FILE="/etc/systemd/system/targethub-agent@.service"
+INSTANCE="$(printf '%s' "$ENROLLMENT_TOKEN" | sha256sum | cut -c1-16)"
+CONFIG_PATH="$CONFIG_DIR/${INSTANCE}.json"
+SERVICE_NAME="targethub-agent@${INSTANCE}.service"
+
 mkdir -p "$BASE_DIR" "$CONFIG_DIR"
 
 curl -fsSL "${TARGETHUB_URL%/}/web/agent/targethub_agent.py" -o "$BASE_DIR/targethub_agent.py"
 chmod 0755 "$BASE_DIR/targethub_agent.py"
 
-cat > "$CONFIG_DIR/config.json" <<EOF
+if [[ ! -f "$CONFIG_PATH" ]] || ! grep -q '"agent_id"' "$CONFIG_PATH"; then
+  cat > "$CONFIG_PATH" <<EOF
 {
   "targethub_url": "${TARGETHUB_URL%/}",
   "enrollment_token": "$ENROLLMENT_TOKEN",
@@ -42,17 +58,18 @@ cat > "$CONFIG_DIR/config.json" <<EOF
   "resources": []
 }
 EOF
-chmod 0600 "$CONFIG_DIR/config.json"
+  chmod 0600 "$CONFIG_PATH"
+fi
 
-cat > /etc/systemd/system/targethub-agent.service <<EOF
+cat > "$UNIT_FILE" <<'EOF'
 [Unit]
-Description=TargetHub Agent
+Description=TargetHub Agent (%i)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 $BASE_DIR/targethub_agent.py --config $CONFIG_DIR/config.json
+ExecStart=/usr/bin/python3 /opt/targethub-agent/targethub_agent.py --config /etc/targethub-agent/%i.json
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
@@ -62,9 +79,11 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now targethub-agent.service
+systemctl enable --now "$SERVICE_NAME"
 
 echo
-echo "TargetHub Agent installed and started."
-echo "Check status with: systemctl status targethub-agent"
-echo "View logs with:   journalctl -u targethub-agent -f"
+echo "TargetHub Agent instance installed and started: $SERVICE_NAME"
+echo "Config: $CONFIG_PATH"
+echo "Check status with: systemctl status $SERVICE_NAME"
+echo "View logs with:   journalctl -u $SERVICE_NAME -f"
+echo "Multiple Agent enrollments can run side-by-side on this Linux host."
