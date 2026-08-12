@@ -42,12 +42,11 @@ def list_enrollments(service: Service):
 
 @router.post("/enrollments", response_model=AgentEnrollmentResponse, status_code=201)
 def create_enrollment(request: AgentEnrollmentCreate, service: Service):
-    enrollment, token = service.create_enrollment(request.agent_name, request.deployment_scenario)
+    enrollment, token = service.create_enrollment(request.agent_name)
     install_url = f"{settings.targethub_public_url.rstrip('/')}/web/agent/install.sh"
     return AgentEnrollmentResponse(
         id=enrollment.id,
         agent_name=enrollment.agent_name,
-        deployment_scenario=enrollment.deployment_scenario,
         expires_at=enrollment.expires_at,
         used_at=enrollment.used_at,
         agent_id=enrollment.agent_id,
@@ -63,17 +62,12 @@ def create_enrollment(request: AgentEnrollmentCreate, service: Service):
 
 @router.post("/enroll", response_model=AgentEnrollResponse)
 def enroll_agent(request: AgentEnrollRequest, service: Service):
-    agent, credential = service.enroll(request.token, request.hostname, request.platform)
+    agent, credential = service.enroll(request.token, request.hostname)
     return AgentEnrollResponse(
         agent=agent,
         credential=credential,
         heartbeat_url=f"{settings.targethub_public_url.rstrip('/')}/api/v1/agents/{agent.id}/heartbeat",
     )
-
-
-@router.post("/register", response_model=AgentResponse, status_code=201, deprecated=True)
-def register_agent(request: AgentCreate, service: Service):
-    return service.register(request.name, request.hostname)
 
 
 @router.post("/{agent_id}/heartbeat", response_model=AgentResponse)
