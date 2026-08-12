@@ -33,28 +33,6 @@ class AgentService:
     def _now() -> datetime:
         return datetime.now(timezone.utc)
 
-    @staticmethod
-    def _validate_deployment_platform(deployment_scenario: str, platform: str | None):
-        """Ensure the enrollment is installed on the platform selected by the admin.
-
-        `same_linux` intentionally means a non-Raspberry-Pi Linux host. Raspberry Pi
-        deployments use one of the two Raspberry Pi scenarios.
-        """
-        if platform not in {"linux", "raspberry_pi"}:
-            raise ConflictResource("Agent platform could not be identified")
-
-        if deployment_scenario == "same_linux" and platform != "linux":
-            raise ConflictResource(
-                "This enrollment is for TargetHub + Agent on the same Linux machine; "
-                "install it on a non-Raspberry-Pi Linux host."
-            )
-
-        if deployment_scenario in {"remote_raspberry_pi", "raspberry_pi_all_in_one"} and platform != "raspberry_pi":
-            raise ConflictResource(
-                "This enrollment requires the Agent to run on a Raspberry Pi. "
-                "Run the installation command on the Raspberry Pi selected for this deployment."
-            )
-
     def _refresh_liveness(self, agents: list[Agent]):
         cutoff = self._now() - timedelta(seconds=AGENT_OFFLINE_AFTER_SECONDS)
         changed_agents = []
@@ -84,7 +62,7 @@ class AgentService:
         self._refresh_liveness([agent])
         return agent
 
-    def create_enrollment(self, agent_name: str, deployment_scenario: str):
+    def create_enrollment(self, agent_name: str):
         agent_name = agent_name.strip()
         if not agent_name:
             raise ConflictResource("Agent name is required")
@@ -94,14 +72,13 @@ class AgentService:
         token = self._new_secret("enroll")
         enrollment = AgentEnrollment(
             agent_name=agent_name,
-            deployment_scenario=deployment_scenario,
             token_hash=self._hash_secret(token),
             expires_at=self._now() + timedelta(minutes=ENROLLMENT_TTL_MINUTES),
         )
         self.repository.create_enrollment(enrollment)
         return enrollment, token
 
-    def enroll(self, token: str, hostname: str | None, platform: str | None):
+    def enroll(self, token: str, hostname: str | None):
         enrollment = self.repository.get_enrollment_by_token_hash(self._hash_secret(token))
         if not enrollment:
             raise AuthenticationError("Invalid enrollment token")
@@ -113,8 +90,6 @@ class AgentService:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         if expires_at <= self._now():
             raise ConflictResource("Enrollment token has expired")
-
-        self._validate_deployment_platform(enrollment.deployment_scenario, platform)
 
         agent = self.repository.get_by_name(enrollment.agent_name)
         if agent is None:
