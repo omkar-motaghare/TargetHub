@@ -80,7 +80,7 @@ def test_expired_enrollment_is_rejected():
         service.enroll(token, "linux-host")
 
 
-def test_duplicate_agent_name_is_rejected():
+def test_duplicate_active_agent_name_is_rejected():
     repository = FakeRepository()
     service = AgentService(repository)
 
@@ -89,6 +89,27 @@ def test_duplicate_agent_name_is_rejected():
 
     with pytest.raises(Exception, match="already registered"):
         service.create_enrollment("agent-duplicate")
+
+
+def test_revoked_agent_can_be_reenrolled_with_same_name():
+    repository = FakeRepository()
+    service = AgentService(repository)
+
+    first_enrollment, first_token = service.create_enrollment("agent-reenroll")
+    agent, old_credential = service.enroll(first_token, "linux-host-01")
+    service.revoke_credential(agent.id)
+
+    second_enrollment, second_token = service.create_enrollment("agent-reenroll")
+    assert second_enrollment.agent_name == "agent-reenroll"
+
+    re_enrolled, new_credential = service.enroll(second_token, "linux-host-02")
+    assert re_enrolled is agent
+    assert new_credential != old_credential
+    assert re_enrolled.hostname == "linux-host-02"
+    assert service.authenticate_credential(new_credential) is agent
+
+    with pytest.raises(Exception, match="Invalid or disabled"):
+        service.authenticate_credential(old_credential)
 
 
 def test_multiple_agents_can_share_the_same_linux_host():
@@ -117,3 +138,20 @@ def test_disabled_agent_cannot_authenticate():
 
     with pytest.raises(Exception, match="disabled"):
         service.authenticate_credential(credential)
+
+
+def test_disabled_agent_can_be_reenrolled_with_same_name():
+    repository = FakeRepository()
+    service = AgentService(repository)
+
+    first_enrollment, first_token = service.create_enrollment("agent-disabled")
+    agent, old_credential = service.enroll(first_token, "linux-host-01")
+    service.disable(agent.id)
+
+    second_enrollment, second_token = service.create_enrollment("agent-disabled")
+    re_enrolled, new_credential = service.enroll(second_token, "linux-host-02")
+
+    assert re_enrolled is agent
+    assert re_enrolled.enabled is True
+    assert re_enrolled.status == "online"
+    assert new_credential != old_credential
