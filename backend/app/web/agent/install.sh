@@ -32,8 +32,18 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v curl >/dev/null 2>&1; then
+  echo "curl is required." >&2
+  exit 1
+fi
+
 if ! command -v sha256sum >/dev/null 2>&1; then
   echo "sha256sum is required." >&2
+  exit 1
+fi
+
+if ! command -v systemctl >/dev/null 2>&1; then
+  echo "systemd/systemctl is required for the TargetHub Agent service." >&2
   exit 1
 fi
 
