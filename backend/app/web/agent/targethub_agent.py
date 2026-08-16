@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Small dependency-free TargetHub Agent runtime for supported Linux hosts."""
+"""Small dependency-free TargetHub Agent runtime for Linux hosts."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
-import platform
 import socket
 import sys
 import time
@@ -50,17 +49,43 @@ def api_request(url: str, payload: dict, headers: dict | None = None) -> dict:
         raise RuntimeError(f"Unable to reach TargetHub: {exc.reason}") from exc
 
 
+def ensure_linux() -> None:
+    if sys.platform != "linux":
+        raise RuntimeError("TargetHub Agent currently supports Linux hosts only")
+
+
 def discover_resources(config: dict) -> list[dict]:
     resources: list[dict] = []
     hostname = socket.gethostname()
 
-    for path in sorted(set(glob("/dev/ttyUSB*") + glob("/dev/ttyACM*") + glob("/dev/serial/by-id/*"))):
+    # Prefer stable /dev/serial/by-id paths when available. They are often
+    # symlinks to the same devices exposed as /dev/ttyUSB* or /dev/ttyACM*.
+    # Reporting both would make one physical serial device appear twice in the UI.
+    serial_candidates = sorted(
+        set(glob("/dev/serial/by-id/*") + glob("/dev/ttyUSB*") + glob("/dev/ttyACM*"))
+    )
+    seen_serial_devices: set[str] = set()
+    stable_serials = [path for path in serial_candidates if path.startswith("/dev/serial/by-id/")]
+    fallback_serials = [path for path in serial_candidates if not path.startswith("/dev/serial/by-id/")]
+
+    for path in stable_serials + fallback_serials:
+        try:
+            physical_path = os.path.realpath(path)
+        except OSError:
+            physical_path = path
+        if physical_path in seen_serial_devices:
+            continue
+        seen_serial_devices.add(physical_path)
         resources.append(
             {
                 "resource_key": path,
                 "resource_type": "serial",
                 "display_name": Path(path).name,
-                "metadata": {"path": path, "hostname": hostname},
+                "metadata": {
+                    "path": path,
+                    "physical_path": physical_path,
+                    "hostname": hostname,
+                },
                 "available": True,
             }
         )
@@ -101,7 +126,10 @@ def enroll(config: dict, config_path: Path) -> None:
 
     result = api_request(
         f"{targethub_url}/api/v1/agents/enroll",
-        {"token": token, "hostname": socket.gethostname()},
+        {
+            "token": token,
+            "hostname": socket.gethostname(),
+        },
     )
     config["agent_id"] = result["agent"]["id"]
     config["credential"] = result["credential"]
@@ -125,9 +153,7 @@ def heartbeat(config: dict) -> None:
 
 
 def main() -> int:
-    if platform.system() != "Linux":
-        raise RuntimeError("TargetHub Agent requires a Linux-based machine")
-
+    ensure_linux()
     parser = argparse.ArgumentParser(description="TargetHub Agent")
     parser.add_argument("--config", default="/etc/targethub-agent/config.json")
     args = parser.parse_args()
@@ -145,7 +171,7 @@ def main() -> int:
     while True:
         try:
             heartbeat(config)
-        except Exception as exc:
+        except Exception as exc:  # keep the service alive through transient network failures
             print(f"heartbeat error: {exc}", file=sys.stderr)
         time.sleep(interval)
 
