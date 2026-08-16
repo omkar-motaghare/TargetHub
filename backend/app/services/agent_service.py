@@ -66,8 +66,19 @@ class AgentService:
         agent_name = agent_name.strip()
         if not agent_name:
             raise ConflictResource("Agent name is required")
-        if self.repository.get_by_name(agent_name) is not None:
-            raise ConflictResource(f"Agent name '{agent_name}' is already registered")
+
+        existing = self.repository.get_by_name(agent_name)
+        if existing is not None:
+            # A healthy/active Agent already owns this identity. Reusing the
+            # name would unexpectedly replace its credential. A disabled or
+            # revoked Agent may be explicitly re-enrolled instead.
+            credential_active = (
+                existing.enabled
+                and existing.credential_hash is not None
+                and existing.credential_revoked_at is None
+            )
+            if credential_active:
+                raise ConflictResource(f"Agent name '{agent_name}' is already registered")
 
         token = self._new_secret("enroll")
         enrollment = AgentEnrollment(
@@ -92,20 +103,16 @@ class AgentService:
             raise ConflictResource("Enrollment token has expired")
 
         agent = self.repository.get_by_name(enrollment.agent_name)
-        if agent is not None:
-            raise ConflictResource(f"Agent name '{enrollment.agent_name}' is already registered")
-
-        agent = Agent(
-            name=enrollment.agent_name,
-            hostname=hostname,
-            status="online",
-            enabled=True,
-            last_seen_at=self._now(),
-        )
-        self.repository.create(agent)
+        if agent is None:
+            agent = Agent(name=enrollment.agent_name)
+            self.repository.create(agent)
 
         credential = self._new_secret("agent")
         now = self._now()
+        agent.hostname = hostname or agent.hostname
+        agent.status = "online"
+        agent.enabled = True
+        agent.last_seen_at = now
         agent.credential_hash = self._hash_secret(credential)
         agent.credential_prefix = credential[:12]
         agent.credential_created_at = now
