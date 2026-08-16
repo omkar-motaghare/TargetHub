@@ -16,6 +16,7 @@ TargetHub provides the first-version Agent enrollment lifecycle:
 10. Team Admin can disable/enable an Agent or revoke its credential.
 11. Agents with no heartbeat for more than 45 seconds are shown as offline.
 12. Multiple independent Agents can run on the same Linux host.
+13. A disabled or credential-revoked Agent can be re-enrolled using the same Agent name; an active Agent name cannot be reused.
 
 ## Platform requirement
 
@@ -111,4 +112,6 @@ Agent credential:
 
 ## Operational recovery
 
-If an Agent credential is revoked, create a new enrollment with a new Agent name if you want a new Agent identity. If an enrollment token expires or is consumed, create another enrollment rather than reusing the old token.
+If an Agent credential is revoked or the Agent is disabled, create a new enrollment using the **same Agent name** to restore that Agent identity with a new credential. The existing active credential is never replaced merely by creating an enrollment; active Agent names remain protected from accidental credential replacement.
+
+If an enrollment token expires or is consumed, create another enrollment rather than reusing the old token.
