@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_db
+from app.api.dependencies import get_db, require_role
 from app.core.config import settings
 from app.repositories.agent_repository import AgentRepository
 from app.schemas.agent import (
@@ -36,12 +36,12 @@ def list_agents(service: Service):
 
 
 @router.get("/enrollments", response_model=list[AgentEnrollmentResponse])
-def list_enrollments(service: Service):
+def list_enrollments(service: Service, _admin=Depends(require_role("admin"))):
     return service.list_enrollments()
 
 
 @router.post("/enrollments", response_model=AgentEnrollmentResponse, status_code=201)
-def create_enrollment(request: AgentEnrollmentCreate, service: Service):
+def create_enrollment(request: AgentEnrollmentCreate, service: Service, _admin=Depends(require_role("admin"))):
     enrollment, token = service.create_enrollment(request.agent_name)
     install_url = f"{settings.targethub_public_url.rstrip('/')}/web/agent/install.sh"
     return AgentEnrollmentResponse(
@@ -95,17 +95,17 @@ def heartbeat(
 
 
 @router.post("/{agent_id}/disable", response_model=AgentResponse)
-def disable_agent(agent_id: str, service: Service):
+def disable_agent(agent_id: str, service: Service, _admin=Depends(require_role("admin"))):
     return service.disable(agent_id)
 
 
 @router.post("/{agent_id}/enable", response_model=AgentResponse)
-def enable_agent(agent_id: str, service: Service):
+def enable_agent(agent_id: str, service: Service, _admin=Depends(require_role("admin"))):
     return service.enable(agent_id)
 
 
 @router.post("/{agent_id}/revoke-credential", response_model=AgentResponse)
-def revoke_credential(agent_id: str, service: Service):
+def revoke_credential(agent_id: str, service: Service, _admin=Depends(require_role("admin"))):
     return service.revoke_credential(agent_id)
 
 

@@ -10,6 +10,7 @@ dependencies = [
     "uvicorn[standard]",
     "sqlalchemy",
     "alembic",
+    "python-multipart",
     "pydantic-settings",
     "python-dotenv",
     "loguru",
