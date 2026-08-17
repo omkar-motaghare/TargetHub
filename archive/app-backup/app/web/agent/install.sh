@@ -12,7 +12,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$TARGETHUB_URL" || -z "$ENROLLMENT_TOKEN" ]]; then
+if [[ -z "${TARGETHUB_URL}" || -z "${ENROLLMENT_TOKEN}" ]]; then
   echo "Usage: install.sh --targethub-url URL --enrollment-token TOKEN" >&2
   exit 2
 fi
@@ -45,7 +45,7 @@ fi
 BASE_DIR="/opt/targethub-agent"
 CONFIG_DIR="/etc/targethub-agent"
 UNIT_FILE="/etc/systemd/system/targethub-agent@.service"
-INSTANCE="$(printf '%s' "$ENROLLMENT_TOKEN" | sha256sum | cut -c1-16)"
+INSTANCE="$(printf '%s' "${ENROLLMENT_TOKEN}" | sha256sum | cut -c1-16)"
 CONFIG_PATH="$CONFIG_DIR/${INSTANCE}.json"
 SERVICE_NAME="targethub-agent@${INSTANCE}.service"
 
