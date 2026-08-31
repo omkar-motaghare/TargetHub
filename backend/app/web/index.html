@@ -9,10 +9,33 @@
 <body>
   <header class="topbar">
     <div class="brand"><span class="brand-mark">TH</span><div><strong>TargetHub</strong><small>Embedded Lab Control</small></div></div>
-    <div class="identity"><span class="status-dot"></span> Local instance <strong id="user-label">developer</strong> <span class="role-badge">TEAM ADMIN</span></div>
+    <div class="identity">
+      <span class="status-dot"></span>
+      Local instance
+      <strong id="user-label">guest</strong>
+      <span class="role-badge" id="role-label">NOT LOGGED IN</span>
+      <button class="secondary compact" id="logout" type="button">Logout</button>
+    </div>
   </header>
 
   <main class="container">
+    <section class="panel auth-panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">ACCESS</p>
+          <h2>Sign In</h2>
+        </div>
+        <span class="muted">Use a TargetHub username and password. All operations are now authenticated.</span>
+      </div>
+      <form id="auth-form" class="auth-form">
+        <label>Username<input id="auth-username" required placeholder="admin"></label>
+        <label>Password<input id="auth-password" type="password" required placeholder="********"></label>
+        <div class="auth-actions">
+          <button class="primary" type="submit">Login</button>
+        </div>
+      </form>
+    </section>
+
     <section class="hero">
       <div><p class="eyebrow">LAB DASHBOARD</p><h1>Targets</h1><p>See availability and reservations before accessing shared hardware.</p></div>
       <button class="secondary" id="refresh">Refresh</button>
@@ -59,8 +82,20 @@
     </section>
 
     <section class="panel">
-      <div class="panel-head"><div><p class="eyebrow">RESERVATIONS</p><h2>Current reservations</h2></div><span class="muted">Identity: developer</span></div>
+      <div class="panel-head"><div><p class="eyebrow">RESERVATIONS</p><h2>Current reservations</h2></div><span class="muted">Identity: <span id="reservation-identity">guest</span></span></div>
       <div class="table-wrap"><table><thead><tr><th>Target</th><th>User</th><th>Starts</th><th>Ends</th><th>Status</th><th></th></tr></thead><tbody id="reservations"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody></table></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><div><p class="eyebrow">SESSIONS</p><h2>Target sessions</h2></div><span class="muted">Open sessions from your reservation row, then use serial operations here.</span></div>
+      <div class="table-wrap"><table><thead><tr><th>Capability</th><th>User</th><th>Target</th><th>Provider</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody id="sessions"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody></table></div>
+      <div class="serial-console">
+        <div class="serial-head">
+          <strong>Serial console output</strong>
+          <button class="secondary compact" type="button" id="clear-serial">Clear</button>
+        </div>
+        <pre id="serial-output" class="serial-output">No serial output yet.</pre>
+      </div>
     </section>
   </main>
 
