@@ -20,6 +20,17 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///targethub.db"
 
+    # Redis (cache + broker for Celery)
+    redis_url: str = "redis://redis:6379/0"
+
+    # Celery broker (alias of redis_url by default)
+    broker_url: str | None = None
+
+    # MinIO / S3-compatible object storage (optional)
+    minio_endpoint: str = "minio:9000"
+    minio_access_key: str | None = None
+    minio_secret_key: str | None = None
+
     secret_key: str
     targethub_public_url: str = "http://localhost:8000"
 

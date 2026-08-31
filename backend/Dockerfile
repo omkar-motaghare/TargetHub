@@ -6,16 +6,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY pyproject.toml ./
-COPY README.md ./README.md
+COPY . /app
 
 RUN pip install --upgrade pip \
     && pip install .
 
-COPY alembic.ini ./
-COPY alembic ./alembic
-COPY app ./app
+RUN adduser --disabled-password --gecos "" appuser || true
+RUN chown -R appuser /app || true
+USER appuser
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "alembic upgrade heads && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "./entrypoints/run_api.sh"]

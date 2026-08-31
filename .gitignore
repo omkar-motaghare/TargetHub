@@ -36,5 +36,6 @@ coverage/
 .pytest_cache/
 # SQLite
 *.db
+*.db.before-*
 *.sqlite
 *.sqlite3
