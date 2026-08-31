@@ -9,11 +9,7 @@ WORKDIR /app
 COPY . /app
 
 RUN pip install --upgrade pip \
-    && pip install .
-
-RUN adduser --disabled-password --gecos "" appuser || true
-RUN chown -R appuser /app || true
-USER appuser
+    && pip install -r requirements.txt
 
 EXPOSE 8000
 

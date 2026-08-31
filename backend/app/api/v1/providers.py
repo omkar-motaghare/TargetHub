@@ -1,8 +1,9 @@
 import os
 import re
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.api.dependencies import get_current_user
 from app.providers.serial import SerialProvider, SerialProviderConfig
 
 router = APIRouter(prefix="/providers", tags=["Providers"])
@@ -14,7 +15,7 @@ def _env_prefix(provider_key: str) -> str:
 
 
 @router.get("/serial/{provider_key}/health")
-def serial_health(provider_key: str):
+def serial_health(provider_key: str, _user=Depends(get_current_user)):
     prefix = _env_prefix(provider_key)
     port = os.getenv(f"{prefix}_PORT")
     if not port:

@@ -3,7 +3,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_db, require_role
+from app.api.dependencies import (
+    get_current_user,
+    get_db,
+    is_admin_user,
+    require_role,
+    resolve_effective_user_id,
+)
 from app.repositories.reservation_repository import ReservationRepository
 from app.repositories.target_repository import TargetRepository
 from app.schemas.reservation import ReservationCreate, ReservationResponse
@@ -27,27 +33,49 @@ def list_reservations(
     service: Service,
     target_id: str | None = Query(default=None),
     user_id: str | None = Query(default=None),
+    user=Depends(get_current_user),
 ):
+    if not is_admin_user(user):
+        user_id = user.username
+    elif user_id:
+        user_id = resolve_effective_user_id(user, user_id)
     return service.list_reservations(target_id=target_id, user_id=user_id)
 
 
 @router.get("/{reservation_id}", response_model=ReservationResponse)
-def get_reservation(reservation_id: str, service: Service):
-    return service.get_reservation(reservation_id)
+def get_reservation(
+    reservation_id: str,
+    service: Service,
+    user=Depends(get_current_user),
+):
+    reservation = service.get_reservation(reservation_id)
+    if reservation.user_id != user.username and not is_admin_user(user):
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=403, detail="forbidden")
+    return reservation
 
 
 @router.post("", response_model=ReservationResponse, status_code=201)
-def create_reservation(request: ReservationCreate, service: Service):
-    return service.create_reservation(**request.model_dump())
+def create_reservation(
+    request: ReservationCreate,
+    service: Service,
+    user=Depends(get_current_user),
+):
+    payload = request.model_dump()
+    payload["user_id"] = resolve_effective_user_id(user, payload.get("user_id"))
+    return service.create_reservation(**payload)
 
 
 @router.post("/{reservation_id}/release", response_model=ReservationResponse)
 def release_reservation(
     reservation_id: str,
     service: Service,
-    user_id: str = Query(..., min_length=1),
+    user_id: str | None = Query(default=None, min_length=1),
+    user=Depends(get_current_user),
 ):
-    return service.release_reservation(reservation_id, user_id)
+    effective_user_id = resolve_effective_user_id(user, user_id)
+    return service.release_reservation(reservation_id, effective_user_id)
 
 
 @router.post("/{reservation_id}/force-release", response_model=ReservationResponse)
