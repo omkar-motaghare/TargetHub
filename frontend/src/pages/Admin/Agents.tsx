@@ -1,5 +1,11 @@
 import React, { useEffect, useState } from 'react'
-import { listAgents, createAgentEnrollment } from '../../services/api'
+import {
+  createAgentEnrollment,
+  disableAgent,
+  enableAgent,
+  listAgents,
+  revokeAgentCredential,
+} from '../../services/api'
 
 export default function AdminAgents(){
   const [name,setName] = useState('')
@@ -17,6 +23,34 @@ export default function AdminAgents(){
       setName('')
       await load()
     }catch(err:any){ alert(err.message) }
+  }
+
+  async function handleDisable(agentId: string){
+    try{
+      await disableAgent(agentId)
+      await load()
+    }catch(err:any){
+      alert(err.message)
+    }
+  }
+
+  async function handleEnable(agentId: string){
+    try{
+      await enableAgent(agentId)
+      await load()
+    }catch(err:any){
+      alert(err.message)
+    }
+  }
+
+  async function handleRevoke(agentId: string){
+    if(!confirm('Revoke current agent credential?')) return
+    try{
+      await revokeAgentCredential(agentId)
+      await load()
+    }catch(err:any){
+      alert(err.message)
+    }
   }
 
   return (
@@ -44,9 +78,18 @@ export default function AdminAgents(){
           <div key={a.id} className="list-item">
             <div>
               <div style={{fontWeight:600}}>{a.name}</div>
-              <div style={{fontSize:12,color:'#6b7280'}}>{a.hostname || '—'} • {a.resources?.map((r:any)=>r.name).join(', ')}</div>
+              <div style={{fontSize:12,color:'#6b7280'}}>
+                {a.hostname || '—'} | Status: {a.status} | Enabled: {a.enabled ? 'yes' : 'no'}
+              </div>
             </div>
-            <div></div>
+            <div style={{display:'flex',gap:8}}>
+              {a.enabled ? (
+                <button className="button secondary" onClick={()=>handleDisable(a.id)}>Disable</button>
+              ) : (
+                <button className="button" onClick={()=>handleEnable(a.id)}>Enable</button>
+              )}
+              <button className="button secondary" onClick={()=>handleRevoke(a.id)}>Revoke Credential</button>
+            </div>
           </div>
         ))}
       </div>
