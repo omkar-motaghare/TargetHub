@@ -81,3 +81,13 @@ class ReservationService:
         reservation.status = "released"
         reservation.released_at = datetime.now(timezone.utc)
         return self.repository.update(reservation)
+
+    def force_release_reservation(self, reservation_id: str):
+        reservation = self.get_reservation(reservation_id)
+        if reservation.status != "active":
+            raise ConflictResource(
+                f"Reservation '{reservation_id}' is already {reservation.status}"
+            )
+        reservation.status = "released"
+        reservation.released_at = datetime.now(timezone.utc)
+        return self.repository.update(reservation)

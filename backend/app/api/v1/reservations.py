@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_db
+from app.api.dependencies import get_db, require_role
 from app.repositories.reservation_repository import ReservationRepository
 from app.repositories.target_repository import TargetRepository
 from app.schemas.reservation import ReservationCreate, ReservationResponse
@@ -48,3 +48,12 @@ def release_reservation(
     user_id: str = Query(..., min_length=1),
 ):
     return service.release_reservation(reservation_id, user_id)
+
+
+@router.post("/{reservation_id}/force-release", response_model=ReservationResponse)
+def force_release_reservation(
+    reservation_id: str,
+    service: Service,
+    _admin=Depends(require_role("admin")),
+):
+    return service.force_release_reservation(reservation_id)

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_db
+from app.api.dependencies import get_db, get_current_user
 from app.schemas.user import Token, UserCreate, UserResponse
 from app.services.auth_service import AuthService
 
@@ -35,6 +35,17 @@ def create_user(request: UserCreate, auth: AuthService = Depends(get_auth_servic
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     # Convert stored CSV roles to list for response model
+    roles_list = (user.roles or "").split(",") if user.roles else []
+    return UserResponse(
+        id=user.id,
+        username=user.username,
+        roles=roles_list,
+        created_at=user.created_at,
+    )
+
+
+@router.get("/me", response_model=UserResponse)
+def get_me(user=Depends(get_current_user)):
     roles_list = (user.roles or "").split(",") if user.roles else []
     return UserResponse(
         id=user.id,
