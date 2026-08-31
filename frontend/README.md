@@ -1,4 +1,12 @@
-# TargetHub Frontend (minimal scaffold)
+# TargetHub Frontend (experimental)
+
+This frontend is currently an experimental React scaffold.
+
+The **recommended prototype UI** is the backend-served dashboard at:
+
+- http://localhost:8000/dashboard
+
+For normal development and validation, use the Docker workflow from the repository root and continue through the built-in dashboard.
 
 This is a minimal React + TypeScript (Vite) scaffold implementing role-based routing and basic admin/user pages.
 

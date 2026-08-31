@@ -60,6 +60,8 @@ done
 echo "Smoke test: GET /"
 curl -sSf "$API_URL" | sed -n '1,200p'
 
-echo "All done. To view logs: docker compose -f $COMPOSE_FILE logs -f api"
+echo "All done. Canonical dashboard: http://localhost:8000/dashboard"
+echo "API docs: http://localhost:8000/docs"
+echo "To view logs: docker compose -f $COMPOSE_FILE logs -f api"
 
 exit 0

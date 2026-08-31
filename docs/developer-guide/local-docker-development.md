@@ -107,16 +107,33 @@ Expected response is similar to:
 }
 ```
 
+Create an admin user:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/users \
+    -H "Content-Type: application/json" \
+    -d '{"username":"admin","password":"admin1234","roles":["admin"]}'
+```
+
+Get an access token:
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/token \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "username=admin&password=admin1234&grant_type=" | \
+    /home/omkar_motaghare/TargetHub/backend/.venv/bin/python -c "import json,sys; print(json.load(sys.stdin).get('access_token',''))")
+```
+
 Check targets:
 
 ```bash
-curl http://localhost:8000/api/v1/targets
+curl http://localhost:8000/api/v1/targets -H "Authorization: Bearer $TOKEN"
 ```
 
 Check reservations:
 
 ```bash
-curl http://localhost:8000/api/v1/reservations
+curl http://localhost:8000/api/v1/reservations -H "Authorization: Bearer $TOKEN"
 ```
 
 ## 6. Stop TargetHub
@@ -158,7 +175,7 @@ Migrations are applied automatically when the container starts:
 Container start
       |
       v
-alembic upgrade head
+alembic upgrade heads
       |
       v
 uvicorn app.main:app

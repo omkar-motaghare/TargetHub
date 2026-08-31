@@ -6,7 +6,30 @@
 
 TargetHub is an open-source **Embedded Lab Orchestration Platform** that enables engineering teams to efficiently manage shared embedded hardware through a unified interface. It provides target reservation, exclusive hardware access, power control, serial console, firmware deployment, debugger integration, and lab automation—eliminating resource conflicts while improving developer productivity.
 
-> 🚧 **Project Status:** Early Development (Sprint 0 – Foundation & Architecture)
+> 🚧 **Project Status:** Working Prototype (Core platform + authenticated dashboard workflow)
+
+---
+
+# Current Prototype Run Path
+
+TargetHub currently has one **recommended** local workflow.
+
+1. Start the backend stack with Docker Compose.
+2. Use the built-in dashboard served by the backend.
+
+```bash
+docker compose up -d --build
+```
+
+Then open:
+
+- Dashboard: http://localhost:8000/dashboard
+- API docs: http://localhost:8000/docs
+
+Important notes:
+
+- The backend-served dashboard under `backend/app/web/` is the canonical prototype UI.
+- The separate React app under `frontend/` is currently experimental and not the primary developer path.
 
 ---
 

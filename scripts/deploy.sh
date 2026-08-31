@@ -2,15 +2,16 @@
 set -euo pipefail
 
 # One-command deploy helper for local development
-# - stops existing containers (backend and frontend)
+# - stops existing containers (backend and optional experimental frontend)
 # - pulls latest Git changes for current branch
-# - builds frontend (if present) and serves it with nginx container
+# - optionally builds experimental frontend and serves it with nginx container
 # - builds and starts backend via docker-compose
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 echo "[deploy] Starting deploy at $(date --iso-8601=seconds)"
+EXPERIMENTAL_FRONTEND="${ENABLE_EXPERIMENTAL_FRONTEND:-0}"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -52,33 +53,37 @@ BRANCH=$(git rev-parse --abbrev-ref HEAD)
 git fetch origin --prune
 git pull --ff-only origin "$BRANCH" || git pull origin "$BRANCH" || true
 
-# Build frontend if present
-if [ -f frontend/package.json ]; then
-  echo "[deploy] Building frontend"
-  cd frontend
-  if command -v npm >/dev/null 2>&1; then
-    # prefer npm ci for reproducible installs
-    if [ -f package-lock.json ]; then
-      npm ci
+# Build and run experimental frontend only when explicitly enabled
+if [ "$EXPERIMENTAL_FRONTEND" = "1" ]; then
+  if [ -f frontend/package.json ]; then
+    echo "[deploy] Building experimental frontend"
+    cd frontend
+    if command -v npm >/dev/null 2>&1; then
+      # prefer npm ci for reproducible installs
+      if [ -f package-lock.json ]; then
+        npm ci
+      else
+        npm install
+      fi
+      npm run build
     else
-      npm install
+      echo "[deploy] npm not found; skipping frontend build" >&2
     fi
-    npm run build
-  else
-    echo "[deploy] npm not found; skipping frontend build" >&2
-  fi
-  cd "$REPO_ROOT"
+    cd "$REPO_ROOT"
 
-  if [ -d frontend/dist ]; then
-    echo "[deploy] Serving frontend/dist via nginx container on http://localhost:3000"
-    # Remove any existing frontend container
-    stop_if_running targethub_frontend || true
-    docker run -d --name targethub_frontend -p 3000:80 -v "$REPO_ROOT/frontend/dist":/usr/share/nginx/html:ro --restart unless-stopped nginx:alpine
+    if [ -d frontend/dist ]; then
+      echo "[deploy] Serving experimental frontend/dist via nginx container on http://localhost:3000"
+      # Remove any existing frontend container
+      stop_if_running targethub_frontend || true
+      docker run -d --name targethub_frontend -p 3000:80 -v "$REPO_ROOT/frontend/dist":/usr/share/nginx/html:ro --restart unless-stopped nginx:alpine
+    else
+      echo "[deploy] frontend/dist not found after build; skipping nginx serve" >&2
+    fi
   else
-    echo "[deploy] frontend/dist not found after build; skipping nginx serve" >&2
+    echo "[deploy] No frontend/package.json found — skipping frontend build/serve"
   fi
 else
-  echo "[deploy] No frontend/package.json found — skipping frontend build/serve"
+  echo "[deploy] Experimental frontend is disabled (set ENABLE_EXPERIMENTAL_FRONTEND=1 to enable)"
 fi
 
 echo "[deploy] Building and starting backend via docker-compose"
@@ -99,4 +104,8 @@ sleep 3
 echo "[deploy] Current relevant containers:"
 docker ps --filter "name=targethub" --filter "name=targethub_frontend" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
 
-echo "[deploy] Done. Backend on http://localhost:8000, frontend on http://localhost:3000 (if built and served)"
+echo "[deploy] Done. Canonical dashboard: http://localhost:8000/dashboard"
+echo "[deploy] API docs: http://localhost:8000/docs"
+if [ "$EXPERIMENTAL_FRONTEND" = "1" ]; then
+  echo "[deploy] Experimental frontend: http://localhost:3000"
+fi
