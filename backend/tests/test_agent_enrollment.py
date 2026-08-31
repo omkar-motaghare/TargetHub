@@ -1,4 +1,5 @@
 import os
+import uuid
 from datetime import timedelta
 
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
@@ -33,10 +34,14 @@ class FakeRepository:
         return next((item for item in self.enrollments if item.token_hash == token_hash), None)
 
     def create(self, agent):
+        if not agent.id:
+            agent.id = str(uuid.uuid4())
         self.agents.append(agent)
         return agent
 
     def create_enrollment(self, enrollment):
+        if not enrollment.id:
+            enrollment.id = str(uuid.uuid4())
         self.enrollments.append(enrollment)
         return enrollment
 
