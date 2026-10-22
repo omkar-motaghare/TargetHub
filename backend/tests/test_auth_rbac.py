@@ -635,3 +635,16 @@ def test_non_admin_target_and_capability_responses_hide_internals(client, admin_
     assert admin_capability["provider_key"] == "serial.lab"
     admin_target = client.get(f"/api/v1/targets/{target_id}", headers=admin).json()
     assert admin_target["capabilities"][0]["provider_config"] == {"secret": "hunter2", "port": "/dev/ttyUSB0"}
+
+
+def test_enrollment_install_command_verifies_checksums(client, admin_token):
+    response = client.post(
+        "/api/v1/agents/enrollments",
+        json={"agent_name": "pi-1"},
+        headers=auth_headers(admin_token),
+    )
+    assert response.status_code == 201, response.text
+    command = response.json()["install_command"]
+    assert "| sudo bash" not in command
+    assert "sha256sum -c" in command
+    assert "--agent-sha256" in command

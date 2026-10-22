@@ -1,3 +1,5 @@
+import hashlib
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -25,6 +27,8 @@ from app.schemas.agent import (
 )
 from app.services.agent_operation_service import AgentOperationService
 from app.services.agent_service import AgentService
+
+AGENT_WEB_DIR = Path(__file__).resolve().parents[2] / "web" / "agent"
 
 router = APIRouter(prefix="/agents", tags=["Agents"])
 bearer = HTTPBearer(auto_error=False)
@@ -58,6 +62,21 @@ def _authenticate_agent(agent_id: str, credentials: Credentials, service: Servic
     return agent
 
 
+def _sha256_of(name: str) -> str:
+    return hashlib.sha256((AGENT_WEB_DIR / name).read_bytes()).hexdigest()
+
+
+def build_install_command(base_url: str, token: str) -> str:
+    """Download the installer, verify its checksum, then run it with the agent checksum."""
+    insecure = " --allow-insecure-http" if base_url.startswith("http://") else ""
+    return (
+        f"curl -fsSL {base_url}/web/agent/install.sh -o targethub-install.sh && "
+        f"echo '{_sha256_of('install.sh')}  targethub-install.sh' | sha256sum -c - && "
+        f"sudo bash targethub-install.sh --targethub-url '{base_url}' "
+        f"--enrollment-token '{token}' --agent-sha256 {_sha256_of('targethub_agent.py')}{insecure}"
+    )
+
+
 @router.get("", response_model=list[AgentResponse])
 def list_agents(service: Service, _admin=Depends(require_role("admin"))):
     return service.list_agents()
@@ -71,7 +90,7 @@ def list_enrollments(service: Service, _admin=Depends(require_role("admin"))):
 @router.post("/enrollments", response_model=AgentEnrollmentResponse, status_code=201)
 def create_enrollment(request: AgentEnrollmentCreate, service: Service, _admin=Depends(require_role("admin"))):
     enrollment, token = service.create_enrollment(request.agent_name)
-    install_url = f"{settings.targethub_public_url.rstrip('/')}/web/agent/install.sh"
+    base_url = settings.targethub_public_url.rstrip("/")
     return AgentEnrollmentResponse(
         id=enrollment.id,
         agent_name=enrollment.agent_name,
@@ -80,11 +99,8 @@ def create_enrollment(request: AgentEnrollmentCreate, service: Service, _admin=D
         agent_id=enrollment.agent_id,
         created_at=enrollment.created_at,
         token=token,
-        targethub_url=settings.targethub_public_url.rstrip("/"),
-        install_command=(
-            f"curl -fsSL {install_url} | sudo bash -s -- "
-            f"--targethub-url '{settings.targethub_public_url.rstrip('/')}' --enrollment-token '{token}'"
-        ),
+        targethub_url=base_url,
+        install_command=build_install_command(base_url, token),
     )
 
 

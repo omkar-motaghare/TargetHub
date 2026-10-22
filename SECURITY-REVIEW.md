@@ -2,6 +2,7 @@
 
 **Date:** 2026-09-23
 **Scope:** Full-repository in-depth security review (authentication, RBAC, Agent enrollment/credential lifecycle, provider gateway, repositories, deployment configuration, Agent installer/runtime supply chain).
+**Status update (2026-10-22):** findings 1-4 are remediated with regression tests; see the Remediation table below.
 **Type:** Report-only pass. No fixes were applied in this pass; see "Suggested fix" per finding for remediation guidance.
 
 This document is a point-in-time record of the review. It should be revisited whenever authentication, RBAC, Agent credential handling, provider gateway logic, or deployment configuration changes materially.
@@ -16,6 +17,15 @@ This document is a point-in-time record of the review. It should be revisited wh
 | 2 | 🟡 MEDIUM | `backend/app/api/v1/target_capabilities.py`, `backend/app/api/v1/targets.py` | Any authenticated user can read internal `provider_config`/`agent_id`/`resource_id` for every target | 7/10 |
 | 3 | 🟡 MEDIUM | `backend/app/services/reservation_service.py`, `backend/app/repositories/reservation_repository.py` | Check-then-act race in reservation overlap validation; no DB exclusion constraint | 6/10 |
 | 4 | 🟡 MEDIUM | `backend/app/web/agent/install.sh`, `backend/app/api/v1/agents.py` | Agent installer/runtime fetched via `curl \| sudo bash` and run as root with no integrity/signature verification; defaults to plaintext HTTP | 6/10 |
+
+### Remediation status
+
+| # | Status | Fix | Regression test |
+|---|--------|-----|-----------------|
+| 1 | Fixed | `Settings` rejects empty/placeholder/<32-char `SECRET_KEY` unless `ENVIRONMENT` is `development`/`dev`/`test` (default is `production`); compose files require `SECRET_KEY` | `tests/test_config_validation.py` |
+| 2 | Fixed | Non-admin target/capability responses omit `provider_key`, `provider_config`, `agent_id`, `resource_id` | `tests/test_auth_rbac.py::test_non_admin_target_and_capability_responses_hide_internals` |
+| 3 | Fixed | Overlap check and insert run behind a per-target write lock (row lock on Postgres, write lock on SQLite). A Postgres exclusion constraint remains a possible defense-in-depth follow-up. | `tests/test_reservation_service.py::test_concurrent_overlapping_reservations_allow_exactly_one` (SQLite serializes writers, so this test cannot prove the Postgres path) |
+| 4 | Fixed | Enrollment command downloads then verifies the installer sha256; installer verifies the agent sha256, refuses `http://` without `--allow-insecure-http`, and runs the service as a dedicated `targethub` user with a hardened unit | `tests/test_installer.py` |
 
 ---
 

@@ -69,11 +69,16 @@ Open the **Agents** administration section, enter a unique Agent name, and choos
 
 Run the generated command on the Linux machine that should host that Agent:
 
+The UI shows a command that downloads the installer, verifies its sha256, and runs it with the agent's expected sha256. Use an `https://` hub URL; plain `http://` needs `--allow-insecure-http`.
+
 ```bash
-curl -fsSL http://<targethub>/web/agent/install.sh | sudo bash -s -- \
-  --targethub-url 'http://<targethub>' \
-  --enrollment-token '<one-time-token>'
+curl -fsSL https://<targethub>/web/agent/install.sh -o targethub-install.sh
+echo '<installer-sha256>  targethub-install.sh' | sha256sum -c -
+sudo bash targethub-install.sh --targethub-url 'https://<targethub>' \
+  --enrollment-token '<one-time-token>' --agent-sha256 <agent-sha256>
 ```
+
+The service runs as the dedicated `targethub` user (added to `dialout`, `gpio` and `plugdev` when present) under a hardened systemd unit. `--prefix DIR` stages the files under `DIR` without root or systemd, which is how the installer is tested.
 
 The same command shape works whether the Linux host is:
 
