@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Bootstrap backend environment
+        run: bash scripts/bootstrap-backend.sh
+      - name: Lint (ruff)
+        run: backend/.venv/bin/ruff check backend/app
+      - name: Compile backend
+        run: backend/.venv/bin/python -m compileall -q backend/app
+      - name: Run tests
+        env:
+          SECRET_KEY: ci-test-secret
+        run: backend/.venv/bin/python -m pytest -q backend/tests/
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: npm install
+      - name: Build
+        run: npm run build
