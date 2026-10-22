@@ -80,6 +80,8 @@ sudo bash targethub-install.sh --targethub-url 'https://<targethub>' \
 
 The service runs as the dedicated `targethub` user (added to `dialout`, `gpio` and `plugdev` when present) under a hardened systemd unit. `--prefix DIR` stages the files under `DIR` without root or systemd, which is how the installer is tested.
 
+See [Raspberry Pi install](raspberry-pi.md) for aarch64 specifics.
+
 The same command shape works whether the Linux host is:
 
 - the machine running TargetHub;
