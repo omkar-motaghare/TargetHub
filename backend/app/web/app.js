@@ -1,5 +1,25 @@
 const API = "/api/v1";
-const CAPABILITY_TYPES = ["serial", "network", "ssh", "telnet", "ftp", "jlink", "power", "reset"];
+const CAPABILITY_TYPES = ["serial", "network", "ssh", "telnet", "ftp", "jlink", "power", "reset", "deploy"];
+
+// Operations exposed per capability (mirrors backend providers).
+const CAPABILITY_OPERATIONS = {
+  serial: ["read", "write", "close"],
+  power: ["status", "on", "off", "reset", "cycle"],
+  reset: ["status", "on", "off", "reset", "cycle"],
+  ssh: ["info", "exec"],
+  telnet: ["info", "exec"],
+  ftp: ["info", "exec"],
+  network: ["info", "exec"],
+  jlink: ["status", "attach", "detach", "halt", "resume", "reset"],
+  deploy: ["deploy", "status"],
+};
+
+// Operations that need a text parameter (prompted in the UI).
+const OPERATION_PROMPTS = {
+  write: { key: "text", label: "Text to send" },
+  exec: { key: "command", label: "Command to run" },
+  deploy: { key: "artifact", label: "Firmware artifact name" },
+};
 
 const state = {
   token: localStorage.getItem("th_token") || "",
@@ -8,6 +28,8 @@ const state = {
   reservations: [],
   sessions: [],
   agents: [],
+  labs: [],
+  selectedLab: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -122,7 +144,8 @@ function logout() {
   renderReservations([], []);
   renderSessions([], [], []);
   renderAgents([]);
-  $("serial-output").textContent = "No serial output yet.";
+  renderActivity([]);
+  $("serial-output").textContent = "No session output yet.";
   showMessage("Logged out. Sign in to continue.");
 }
 
@@ -311,8 +334,17 @@ function renderSessions(sessions, targets, reservations) {
           const provider = session.provider_key || "-";
           const sessionStatus = esc(session.status);
 
+          const ops = (CAPABILITY_OPERATIONS[session.capability_type] || []).filter(
+            (op) => !(session.capability_type === "serial" && op === "close")
+          );
+          const opButtons = ops
+            .map(
+              (op) =>
+                `<button class="table-action" data-op="${esc(op)}" data-session="${esc(session.id)}">${esc(op)}</button>`
+            )
+            .join("");
           const controls = ownSession && session.status === "active"
-            ? `<div class="reservation-actions"><button class="table-action" data-session-read="${esc(session.id)}">Read serial</button><button class="table-action" data-session-close="${esc(session.id)}">Close</button></div>`
+            ? `<div class="reservation-actions">${opButtons}<button class="table-action danger-action" data-session-close="${esc(session.id)}">close session</button></div>`
             : "";
 
           return `<tr><td>${esc(session.capability_type)}</td><td>${esc(reservationOwners[session.reservation_id] || session.user_id)}</td><td>${esc(targetNames[session.target_id] || session.target_id)}</td><td>${esc(provider)}</td><td>${esc(new Date(session.expires_at).toLocaleString())}</td><td class="table-status">${sessionStatus}</td><td>${controls}</td></tr>`;
@@ -320,12 +352,76 @@ function renderSessions(sessions, targets, reservations) {
         .join("")
     : `<tr><td colspan="7" class="empty">No sessions found.</td></tr>`;
 
-  document.querySelectorAll("button[data-session-read]").forEach((button) => {
-    button.addEventListener("click", () => readSerial(button.dataset.sessionRead));
+  document.querySelectorAll("button[data-op]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const session = state.sessions.find((item) => item.id === button.dataset.session);
+      if (session) executeSessionOp(session, button.dataset.op);
+    });
   });
   document.querySelectorAll("button[data-session-close]").forEach((button) => {
     button.addEventListener("click", () => closeSession(button.dataset.sessionClose));
   });
+}
+
+function renderActivity(entries) {
+  const body = $("activity");
+  if (!body) return;
+  body.innerHTML = entries.length
+    ? entries
+        .map((entry) => {
+          const result = entry.success ? "ok" : "failed";
+          return `<tr><td>${esc(new Date(entry.created_at).toLocaleString())}</td><td>${esc(entry.user_id || "-")}</td><td>${esc(entry.action)}</td><td>${esc(entry.capability_type || "-")}</td><td>${esc(entry.operation || "-")}</td><td class="table-status">${esc(result)}</td><td class="muted">${esc(entry.detail || "")}</td></tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="7" class="empty">No activity recorded yet.</td></tr>`;
+}
+
+function appendConsole(session, operation, result) {
+  const timestamp = new Date().toLocaleTimeString();
+  const header = `[${timestamp}] ${session.capability_type}/${operation} — ${result.message || "ok"}`;
+  const data = result.data || {};
+  let bodyText;
+  if (data.data_text !== undefined) {
+    bodyText = data.data_text;
+  } else {
+    bodyText = JSON.stringify(data, null, 2);
+  }
+  const current = $("serial-output").textContent;
+  const base = current === "No session output yet." ? "" : `${current}\n`;
+  $("serial-output").textContent = `${base}${header}\n${bodyText}`.trim();
+}
+
+async function executeSessionOp(session, operation) {
+  try {
+    clearMessage();
+    const params = {};
+    const promptCfg = OPERATION_PROMPTS[operation];
+    if (promptCfg) {
+      const value = window.prompt(promptCfg.label);
+      if (value === null) return;
+      params[promptCfg.key] = value;
+    }
+
+    let result;
+    if (session.capability_type === "serial" && operation === "read") {
+      result = await request(`/sessions/${session.id}/serial/read`);
+    } else if (session.capability_type === "serial" && operation === "write") {
+      result = await request(`/sessions/${session.id}/serial/write`, {
+        method: "POST",
+        body: JSON.stringify({ text: params.text || "" }),
+      });
+    } else {
+      result = await request(`/sessions/${session.id}/execute`, {
+        method: "POST",
+        body: JSON.stringify({ operation, params }),
+      });
+    }
+
+    appendConsole(session, operation, result);
+    await loadActivity();
+  } catch (error) {
+    showMessage(error.message);
+  }
 }
 
 function agentOptions(selectedId) {
@@ -541,20 +637,39 @@ async function openSession(reservationId) {
       throw new Error("No enabled capabilities are configured on this target");
     }
 
-    const preferred = availableCapabilities.find((capability) => capability.capability_type === "serial");
-    const selectedType = preferred ? preferred.capability_type : availableCapabilities[0].capability_type;
+    const labeled = availableCapabilities.map((capability) => ({
+      ...capability,
+      label: `${capability.name} (${capability.capability_type})`,
+    }));
+
+    let selectedCapability = labeled[0];
+    if (labeled.length > 1) {
+      const options = labeled.map((capability) => capability.label);
+      const choice = window.prompt(
+        `Open session for which capability?\nOptions: ${options.join(", ")}`,
+        options[0]
+      );
+      if (choice === null) return;
+      const normalized = choice.trim().toLowerCase();
+      const resolved = labeled.find((capability) => capability.label.toLowerCase() === normalized);
+      if (!resolved) {
+        throw new Error(`'${choice}' is not an available capability on this target`);
+      }
+      selectedCapability = resolved;
+    }
 
     await request("/sessions", {
       method: "POST",
       body: JSON.stringify({
         reservation_id: reservationId,
         user_id: state.user.username,
-        capability_type: selectedType,
+        capability_type: selectedCapability.capability_type,
+        capability_id: selectedCapability.id,
       }),
     });
 
     await load();
-    showMessage(`Session opened with capability '${selectedType}'.`);
+    showMessage(`Session opened with capability '${selectedCapability.label}'.`);
   } catch (error) {
     showMessage(error.message);
   }
@@ -573,23 +688,35 @@ async function closeSession(sessionId) {
   }
 }
 
-async function readSerial(sessionId) {
-  try {
-    clearMessage();
-    const result = await request(`/sessions/${sessionId}/serial/read`);
-    const content = result?.data?.data_text || result?.data?.data || "<empty>";
-    const timestamp = new Date().toLocaleTimeString();
-    const current = $("serial-output").textContent;
-    const header = `[${timestamp}] ${result?.provider_key || "serial"}`;
-    $("serial-output").textContent = `${current === "No serial output yet." ? "" : `${current}\n`}\n${header}\n${content}`.trim();
-  } catch (error) {
-    showMessage(error.message);
-  }
-}
-
 async function loadAgents() {
   state.agents = await request("/agents");
   renderAgents(state.agents);
+}
+
+async function loadActivity() {
+  if (!isAdmin()) return;
+  try {
+    const entries = await request("/audit?limit=100");
+    renderActivity(entries);
+  } catch (error) {
+    // Activity is admin-only and best-effort in the UI.
+  }
+}
+
+function populateLabFilter() {
+  const select = $("lab-filter");
+  if (!select) return;
+  const current = state.selectedLab;
+  const options = ['<option value="">All labs</option>']
+    .concat(state.labs.map((lab) => `<option value="${esc(lab)}">${esc(lab)}</option>`))
+    .join("");
+  select.innerHTML = options;
+  select.value = current;
+}
+
+function visibleTargets() {
+  if (!state.selectedLab) return state.targets;
+  return state.targets.filter((target) => target.lab_name === state.selectedLab);
 }
 
 async function load() {
@@ -600,24 +727,28 @@ async function load() {
       return;
     }
 
-    const [targets, reservations, agents, sessions] = await Promise.all([
+    const [targets, reservations, sessions, labs] = await Promise.all([
       request("/targets"),
       request("/reservations"),
-      request("/agents"),
       request("/sessions"),
+      request("/labs"),
     ]);
 
     state.targets = targets;
     state.reservations = reservations;
-    state.agents = agents;
     state.sessions = sessions;
+    state.labs = labs;
+    // Agent administration is admin-only on the backend; skip the call for ordinary users.
+    state.agents = isAdmin() ? await request("/agents") : [];
 
-    renderAgents(agents);
-    renderTargets(targets, reservations);
+    populateLabFilter();
+    renderAgents(state.agents);
+    renderTargets(visibleTargets(), reservations);
     renderReservations(reservations, targets);
     renderSessions(sessions, targets, reservations);
+    await loadActivity();
 
-    if (!agents.length && isAdmin()) {
+    if (!state.agents.length && isAdmin()) {
       showMessage("No TargetHub Agents are registered yet. Create an enrollment above to install one.");
     }
   } catch (error) {
@@ -635,8 +766,12 @@ $("add-capability").addEventListener("click", () => addCapability());
 $("cancel-edit").addEventListener("click", resetTargetForm);
 $("auth-form").addEventListener("submit", login);
 $("logout").addEventListener("click", logout);
+$("lab-filter").addEventListener("change", (event) => {
+  state.selectedLab = event.target.value;
+  renderTargets(visibleTargets(), state.reservations);
+});
 $("clear-serial").addEventListener("click", () => {
-  $("serial-output").textContent = "No serial output yet.";
+  $("serial-output").textContent = "No session output yet.";
 });
 
 (async function init() {

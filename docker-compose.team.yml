@@ -1,12 +1,15 @@
-version: "3.8"
+# Compatibility alias for teams/scripts that still call:
+#   docker compose -f docker-compose.team.yml ...
+# Canonical runtime definition is intentionally kept identical to docker-compose.yml.
 
 services:
   postgres:
     image: postgres:15
+    restart: unless-stopped
     environment:
       POSTGRES_DB: targethub
       POSTGRES_USER: targethub
-      POSTGRES_PASSWORD: changeme
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
     volumes:
       - targethub-postgres:/var/lib/postgresql/data
     ports:
@@ -14,6 +17,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     command: ["redis-server", "--save", "60", "1"]
     volumes:
       - targethub-redis:/data
@@ -21,10 +25,12 @@ services:
       - "6379:6379"
 
   minio:
-    image: minio/minio:RELEASE.2024-01-01T00-00-00Z
+    image: minio/minio:latest
+    profiles: ["object-storage"]
+    restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     command: server /data
     ports:
       - "9000:9000"
@@ -33,33 +39,45 @@ services:
 
   api:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://targethub:changeme@postgres:5432/targethub
-      SECRET_KEY: replace-me
-      REDIS_URL: redis://redis:6379/0
-      MINIO_ENDPOINT: http://minio:9000
+      APP_NAME: TargetHub
+      APP_VERSION: 0.1.0
+      ENVIRONMENT: development
+      HOST: 0.0.0.0
+      PORT: 8000
+      LOG_LEVEL: INFO
+      DATABASE_URL: ${DATABASE_URL:-postgresql://targethub:${POSTGRES_PASSWORD:-changeme}@postgres:5432/targethub}
+      SECRET_KEY: ${SECRET_KEY:-targethub-dev-only-change-me}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      TARGETHUB_PUBLIC_URL: ${TARGETHUB_PUBLIC_URL:-http://localhost:8000}
+      ADMIN_BOOTSTRAP_TOKEN: ${ADMIN_BOOTSTRAP_TOKEN:-}
     ports:
       - "8000:8000"
     depends_on:
       - postgres
       - redis
-      - minio
 
   worker:
     build:
       context: ./backend
       dockerfile: Dockerfile.worker
+    restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://targethub:changeme@postgres:5432/targethub
-      SECRET_KEY: replace-me
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: ${DATABASE_URL:-postgresql://targethub:${POSTGRES_PASSWORD:-changeme}@postgres:5432/targethub}
+      SECRET_KEY: ${SECRET_KEY:-targethub-dev-only-change-me}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     depends_on:
       - redis
       - postgres
 
 volumes:
   targethub-postgres:
+    name: targethub_postgres_data
   targethub-redis:
+    name: targethub_redis_data
   targethub-minio:
+    name: targethub_minio_data

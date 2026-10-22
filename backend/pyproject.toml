@@ -11,6 +11,7 @@ dependencies = [
     "uvicorn[standard]",
     "sqlalchemy",
     "alembic",
+    "psycopg[binary]",
     "python-multipart",
     "pydantic-settings",
     "python-dotenv",
@@ -43,4 +44,5 @@ profile = "black"
 
 
 [tool.ruff.lint]
-ignore = ["B008"]
+select = ["E", "F", "I", "UP"]
+ignore = ["B008", "E501"]

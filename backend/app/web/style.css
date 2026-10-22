@@ -8,3 +8,8 @@
 .serial-output{margin:0;min-height:140px;max-height:260px;overflow:auto;padding:12px;border-radius:8px;background:#0f172a;color:#e2e8f0;font-size:12px;line-height:1.45}
 .reservation-actions{display:flex;gap:8px;flex-wrap:wrap}
 @media(max-width:700px){.auth-form{grid-template-columns:1fr}.auth-actions{align-items:stretch}}
+.hero-actions{display:flex;align-items:center;gap:12px}
+.lab-filter{display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:800;color:#667085;text-transform:uppercase;letter-spacing:.05em}
+.lab-filter select{font:inherit;text-transform:none;letter-spacing:0;font-weight:600;color:#172033;border:1px solid #d0d5dd;border-radius:8px;padding:8px 10px;background:#fff}
+.danger-action{color:#b42318}
+@media(max-width:700px){.hero-actions{width:100%;justify-content:space-between}}

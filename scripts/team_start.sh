@@ -5,7 +5,7 @@ set -eu
 # Pull latest from git, build images, start services and wait for API readiness.
 
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
-COMPOSE_FILE="$ROOT_DIR/docker-compose.team.yml"
+COMPOSE_FILE="${COMPOSE_FILE:-$ROOT_DIR/docker-compose.yml}"
 
 echo "Running from root: $ROOT_DIR"
 
@@ -60,7 +60,9 @@ done
 echo "Smoke test: GET /"
 curl -sSf "$API_URL" | sed -n '1,200p'
 
-echo "All done. Canonical dashboard: http://localhost:8000/dashboard"
+echo "All done. Canonical frontend (backend-served React): http://localhost:8000/app"
+echo "Dashboard alias (React): http://localhost:8000/dashboard"
+echo "Legacy fallback dashboard: http://localhost:8000/legacy-dashboard"
 echo "API docs: http://localhost:8000/docs"
 echo "To view logs: docker compose -f $COMPOSE_FILE logs -f api"
 

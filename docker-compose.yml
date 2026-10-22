@@ -1,12 +1,43 @@
 services:
-  targethub:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: targethub
+  postgres:
+    image: postgres:15
     restart: unless-stopped
+    environment:
+      POSTGRES_DB: targethub
+      POSTGRES_USER: targethub
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - targethub-postgres:/var/lib/postgresql/data
     ports:
-      - "8000:8000"
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1"]
+    volumes:
+      - targethub-redis:/data
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    profiles: ["object-storage"]
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: server /data
+    ports:
+      - "9000:9000"
+    volumes:
+      - targethub-minio:/data
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
     environment:
       APP_NAME: TargetHub
       APP_VERSION: 0.1.0
@@ -14,11 +45,35 @@ services:
       HOST: 0.0.0.0
       PORT: 8000
       LOG_LEVEL: INFO
-      DATABASE_URL: sqlite:////data/targethub.db
+      DATABASE_URL: ${DATABASE_URL:-postgresql://targethub:${POSTGRES_PASSWORD:-changeme}@postgres:5432/targethub}
       SECRET_KEY: ${SECRET_KEY:-targethub-dev-only-change-me}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
       TARGETHUB_PUBLIC_URL: ${TARGETHUB_PUBLIC_URL:-http://localhost:8000}
-    volumes:
-      - targethub_data:/data
+      ADMIN_BOOTSTRAP_TOKEN: ${ADMIN_BOOTSTRAP_TOKEN:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://targethub:${POSTGRES_PASSWORD:-changeme}@postgres:5432/targethub}
+      SECRET_KEY: ${SECRET_KEY:-targethub-dev-only-change-me}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    depends_on:
+      - redis
+      - postgres
 
 volumes:
-  targethub_data:
+  targethub-postgres:
+    name: targethub_postgres_data
+  targethub-redis:
+    name: targethub_redis_data
+  targethub-minio:
+    name: targethub_minio_data
