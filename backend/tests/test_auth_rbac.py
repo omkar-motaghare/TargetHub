@@ -352,6 +352,17 @@ def test_reservation_and_session_ownership(client, admin_token):
         f"/api/v1/sessions/{session_body['id']}", headers=auth_headers(token_a)
     )
     assert owner_ok.status_code == 200
+    for leaked in ("agent_id", "resource_id", "provider_key"):
+        assert leaked not in session_body
+        assert leaked not in owner_ok.json()
+    listed = client.get("/api/v1/sessions", headers=auth_headers(token_a)).json()
+    assert listed and all("agent_id" not in item for item in listed)
+
+    admin_view = client.get(
+        f"/api/v1/sessions/{session_body['id']}", headers=auth_headers(admin_token)
+    ).json()
+    assert admin_view["agent_id"] == agent_id
+    assert admin_view["resource_id"] == resource_id
 
 
 def test_ordinary_user_cannot_impersonate_via_user_id(client, admin_token):

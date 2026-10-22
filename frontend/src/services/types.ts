@@ -73,10 +73,10 @@ export type Session = {
   target_id: string
   user_id: string
   capability_type: CapabilityType
-  provider_key: string | null
+  provider_key?: string | null
   capability_id: string | null
-  agent_id: string | null
-  resource_id: string | null
+  agent_id?: string | null
+  resource_id?: string | null
   status: string
   expires_at: string
   ended_at: string | null

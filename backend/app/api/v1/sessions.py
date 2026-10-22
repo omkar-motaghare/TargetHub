@@ -16,7 +16,7 @@ from app.repositories.audit_repository import AuditRepository
 from app.repositories.reservation_repository import ReservationRepository
 from app.repositories.session_repository import SessionRepository
 from app.repositories.target_repository import TargetRepository
-from app.schemas.session import SessionCreate, SessionResponse
+from app.schemas.session import SessionCreate, SessionPublicResponse, SessionResponse
 from app.services.agent_operation_service import AgentOperationService
 from app.services.audit_service import AuditService
 from app.services.provider_gateway import ProviderGateway
@@ -59,6 +59,12 @@ def get_provider_gateway(db: Annotated[Session, Depends(get_db)]) -> ProviderGat
 Gateway = Annotated[ProviderGateway, Depends(get_provider_gateway)]
 
 
+def present(session, user) -> SessionResponse | SessionPublicResponse:
+    if is_admin_user(user):
+        return SessionResponse.model_validate(session)
+    return SessionPublicResponse.model_validate(session)
+
+
 class SerialWriteRequest(BaseModel):
     text: str = Field(default="")
 
@@ -68,7 +74,7 @@ class ExecuteRequest(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
-@router.get("", response_model=list[SessionResponse])
+@router.get("", response_model=list[SessionResponse | SessionPublicResponse])
 def list_sessions(
     service: Service,
     user_id: str | None = Query(default=None),
@@ -79,10 +85,10 @@ def list_sessions(
         user_id = user.username
     elif user_id:
         user_id = resolve_effective_user_id(user, user_id)
-    return service.list_sessions(user_id=user_id, target_id=target_id)
+    return [present(item, user) for item in service.list_sessions(user_id=user_id, target_id=target_id)]
 
 
-@router.get("/{session_id}", response_model=SessionResponse, responses={403: {"description": "Forbidden"}})
+@router.get("/{session_id}", response_model=SessionResponse | SessionPublicResponse, responses={403: {"description": "Forbidden"}})
 def get_session(
     session_id: str,
     service: Service,
@@ -93,10 +99,10 @@ def get_session(
         from fastapi import HTTPException
 
         raise HTTPException(status_code=403, detail="forbidden")
-    return session
+    return present(session, user)
 
 
-@router.post("", response_model=SessionResponse, status_code=201)
+@router.post("", response_model=SessionResponse | SessionPublicResponse, status_code=201)
 def create_session(
     request: SessionCreate,
     service: Service,
@@ -114,10 +120,10 @@ def create_session(
         provider_key=session.provider_key,
         capability_type=session.capability_type,
     )
-    return session
+    return present(session, user)
 
 
-@router.post("/{session_id}/close", response_model=SessionResponse)
+@router.post("/{session_id}/close", response_model=SessionResponse | SessionPublicResponse)
 def close_session(
     session_id: str,
     service: Service,
@@ -136,7 +142,7 @@ def close_session(
         session_id=session.id,
         capability_type=session.capability_type,
     )
-    return session
+    return present(session, user)
 
 
 @router.get("/{session_id}/operations")
