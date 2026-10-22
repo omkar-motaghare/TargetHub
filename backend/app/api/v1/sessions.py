@@ -65,6 +65,12 @@ def present(session, user) -> SessionResponse | SessionPublicResponse:
     return SessionPublicResponse.model_validate(session)
 
 
+def scrub(result: dict[str, Any], user) -> dict[str, Any]:
+    if is_admin_user(user):
+        return result
+    return {key: value for key, value in result.items() if key != "provider_key"}
+
+
 class SerialWriteRequest(BaseModel):
     text: str = Field(default="")
 
@@ -151,7 +157,7 @@ def session_operations(
     gateway: Gateway,
     user=Depends(get_current_user),
 ):
-    return gateway.operations_for(session_id, user.username)
+    return scrub(gateway.operations_for(session_id, user.username), user)
 
 
 @router.post("/{session_id}/execute")
@@ -161,7 +167,7 @@ def session_execute(
     gateway: Gateway,
     user=Depends(get_current_user),
 ):
-    return gateway.execute(session_id, user.username, request.operation, request.params)
+    return scrub(gateway.execute(session_id, user.username, request.operation, request.params), user)
 
 
 @router.post("/{session_id}/serial/open")
@@ -170,7 +176,7 @@ def serial_open(
     gateway: Gateway,
     user=Depends(get_current_user),
 ):
-    return gateway.serial_open(session_id, user.username)
+    return scrub(gateway.serial_open(session_id, user.username), user)
 
 
 @router.get("/{session_id}/serial/read")
@@ -180,7 +186,7 @@ def serial_read(
     size: int = Query(default=4096, ge=1, le=65536),
     user=Depends(get_current_user),
 ):
-    return gateway.serial_read(session_id, user.username, size=size)
+    return scrub(gateway.serial_read(session_id, user.username, size=size), user)
 
 
 @router.post("/{session_id}/serial/write")
@@ -190,7 +196,7 @@ def serial_write(
     gateway: Gateway,
     user=Depends(get_current_user),
 ):
-    return gateway.serial_write(session_id, user.username, text=request.text)
+    return scrub(gateway.serial_write(session_id, user.username, text=request.text), user)
 
 
 @router.post("/{session_id}/serial/close")
@@ -199,4 +205,4 @@ def serial_close(
     gateway: Gateway,
     user=Depends(get_current_user),
 ):
-    return gateway.serial_close(session_id, user.username)
+    return scrub(gateway.serial_close(session_id, user.username), user)

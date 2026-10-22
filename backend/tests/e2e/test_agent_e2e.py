@@ -309,6 +309,20 @@ def test_full_lab_flow(lab: Lab):
     wait_until(got_echo, 20, "serial echo through pty")
     assert execute(serial_id, "write", {"text": "x"}, token=bob).status_code in (403, 409)
 
+    # the terminal UI uses the dedicated serial endpoints
+    assert lab.call("POST", f"/sessions/{serial_id}/serial/write", alice, json={"text": "ui-line\n"}).status_code == 200
+    ui_seen = ""
+
+    def got_ui_echo():
+        nonlocal ui_seen
+        read = lab.call("GET", f"/sessions/{serial_id}/serial/read", alice, params={"size": 256})
+        assert read.status_code == 200, read.text
+        assert "provider_key" not in read.json()
+        ui_seen += read.json()["data"]["data_text"]
+        return "ECHO:ui-line" in ui_seen
+
+    wait_until(got_ui_echo, 20, "serial echo via /serial endpoints")
+
     # --- power through fake GPIO (active-low relay: ON drives the line to 0)
     power = open_session("power")
     assert power.status_code == 201, power.text
