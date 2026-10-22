@@ -55,6 +55,16 @@ class AgentRepository:
         self.db.refresh(enrollment)
         return enrollment
 
+    def claim_enrollment(self, enrollment_id, used_at: datetime) -> bool:
+        """Atomically mark an unused enrollment as used; False if another request won."""
+        claimed = (
+            self.db.query(AgentEnrollment)
+            .filter(AgentEnrollment.id == enrollment_id, AgentEnrollment.used_at.is_(None))
+            .update({AgentEnrollment.used_at: used_at}, synchronize_session=False)
+        )
+        self.db.commit()
+        return claimed == 1
+
     def replace_resources(self, agent: Agent, resources: list[AgentResource]):
         agent.resources.clear()
         agent.resources.extend(resources)

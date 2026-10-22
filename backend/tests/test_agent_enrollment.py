@@ -7,6 +7,7 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key")
 import pytest
 from pydantic import ValidationError
 
+from app.core.exceptions import ConflictResource
 from app.schemas.agent import AgentHeartbeat
 from app.services.agent_service import AgentService
 
@@ -52,6 +53,13 @@ class FakeRepository:
 
     def save_enrollment(self, enrollment):
         return enrollment
+
+    def claim_enrollment(self, enrollment_id, used_at):
+        enrollment = next(item for item in self.enrollments if item.id == enrollment_id)
+        if enrollment.used_at is not None:
+            return False
+        enrollment.used_at = used_at
+        return True
 
     def disable_capabilities_for_agent(self, agent_id):
         self.disabled_capabilities_for_agents.append(agent_id)
@@ -336,3 +344,42 @@ def test_offline_agent_reconnects_to_online_on_heartbeat():
 
     updated = service.heartbeat(agent, "linux-host", [])
     assert updated.status == "online"
+
+
+def test_enroll_loses_race_when_token_already_claimed():
+    repository = FakeRepository()
+    service = AgentService(repository)
+    _, token = service.create_enrollment("agent-race")
+    # Another request claims the token between the used_at check and the claim.
+    repository.claim_enrollment = lambda enrollment_id, used_at: False
+
+    with pytest.raises(ConflictResource):
+        service.enroll(token, "raspberrypi")
+    assert repository.agents == []
+
+
+def test_claim_enrollment_is_atomic_on_a_real_database(tmp_path):
+    from datetime import UTC, datetime
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.models.agent import AgentEnrollment
+    from app.models.base import Base
+    from app.repositories.agent_repository import AgentRepository
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'claim.sqlite3'}")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    with session_factory() as setup:
+        enrollment = AgentEnrollment(
+            agent_name="a", token_hash="h" * 64, expires_at=datetime.now(UTC) + timedelta(minutes=5)
+        )
+        setup.add(enrollment)
+        setup.commit()
+        enrollment_id = enrollment.id
+
+    with session_factory() as first, session_factory() as second:
+        assert AgentRepository(first).claim_enrollment(enrollment_id, datetime.now(UTC)) is True
+        assert AgentRepository(second).claim_enrollment(enrollment_id, datetime.now(UTC)) is False
+    engine.dispose()

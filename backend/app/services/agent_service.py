@@ -102,13 +102,16 @@ class AgentService:
         if expires_at <= self._now():
             raise ConflictResource("Enrollment token has expired")
 
+        now = self._now()
+        if not self.repository.claim_enrollment(enrollment.id, now):
+            raise ConflictResource("Enrollment token has already been used")
+
         agent = self.repository.get_by_name(enrollment.agent_name)
         if agent is None:
             agent = Agent(name=enrollment.agent_name)
             self.repository.create(agent)
 
         credential = self._new_secret("agent")
-        now = self._now()
         agent.hostname = hostname or agent.hostname
         agent.status = "online"
         agent.enabled = True
@@ -120,7 +123,6 @@ class AgentService:
         self.repository.save(agent)
 
         enrollment.agent_id = agent.id
-        enrollment.used_at = now
         self.repository.save_enrollment(enrollment)
         return agent, credential
 
