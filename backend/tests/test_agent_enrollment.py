@@ -5,8 +5,9 @@ from datetime import timedelta
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 
 import pytest
+from pydantic import ValidationError
 
-from app.models.agent import Agent
+from app.schemas.agent import AgentHeartbeat
 from app.services.agent_service import AgentService
 
 
@@ -14,6 +15,7 @@ class FakeRepository:
     def __init__(self):
         self.agents = []
         self.enrollments = []
+        self.disabled_capabilities_for_agents = []
 
     def list(self):
         return self.agents
@@ -50,6 +52,10 @@ class FakeRepository:
 
     def save_enrollment(self, enrollment):
         return enrollment
+
+    def disable_capabilities_for_agent(self, agent_id):
+        self.disabled_capabilities_for_agents.append(agent_id)
+        return 1
 
 
 def test_enrollment_is_single_use_and_credential_authenticates():
@@ -160,3 +166,173 @@ def test_disabled_agent_can_be_reenrolled_with_same_name():
     assert re_enrolled.enabled is True
     assert re_enrolled.status == "online"
     assert new_credential != old_credential
+
+
+def test_revoke_credential_clears_stored_credential_material():
+    """Revocation must not leave any usable credential material behind server-side."""
+    repository = FakeRepository()
+    service = AgentService(repository)
+
+    enrollment, token = service.create_enrollment("agent-wipe")
+    agent, credential = service.enroll(token, "linux-host")
+    assert agent.credential_hash is not None
+    assert agent.credential_prefix is not None
+
+    service.revoke_credential(agent.id)
+
+    assert agent.credential_hash is None
+    assert agent.credential_prefix is None
+    assert agent.credential_revoked_at is not None
+    with pytest.raises(Exception, match="Invalid or disabled|revoked"):
+        service.authenticate_credential(credential)
+
+
+def test_disable_and_revoke_disable_mapped_capabilities():
+    repository = FakeRepository()
+    service = AgentService(repository)
+
+    enrollment, token = service.create_enrollment("agent-disable-capabilities")
+    agent, _credential = service.enroll(token, "linux-host")
+
+    service.disable(agent.id)
+    service.revoke_credential(agent.id)
+
+    assert repository.disabled_capabilities_for_agents.count(agent.id) == 2
+
+
+def test_heartbeat_preserves_resource_id_for_same_resource_key():
+    repository = FakeRepository()
+    service = AgentService(repository)
+
+    enrollment, token = service.create_enrollment("agent-resource-stable")
+    agent, _ = service.enroll(token, "linux-host")
+    first = service.heartbeat(
+        agent,
+        "linux-host",
+        [
+            type(
+                "Resource",
+                (),
+                {
+                    "resource_key": "/dev/serial/by-id/usb-abc",
+                    "resource_type": "serial",
+                    "display_name": "USB Serial",
+                    "metadata": {"path": "/dev/ttyUSB0"},
+                    "available": True,
+                },
+            )()
+        ],
+    )
+    first_resource_id = first.resources[0].id
+
+    second = service.heartbeat(
+        agent,
+        "linux-host",
+        [
+            type(
+                "Resource",
+                (),
+                {
+                    "resource_key": "/dev/serial/by-id/usb-abc",
+                    "resource_type": "serial",
+                    "display_name": "USB Serial Renamed",
+                    "metadata": {"path": "/dev/ttyUSB0", "vendor": "acme"},
+                    "available": False,
+                },
+            )()
+        ],
+    )
+
+    assert second.resources[0].id == first_resource_id
+    assert second.resources[0].display_name == "USB Serial Renamed"
+    assert second.resources[0].resource_metadata["vendor"] == "acme"
+    assert second.resources[0].available is False
+
+
+def test_heartbeat_duplicate_entries_keep_single_resource():
+    repository = FakeRepository()
+    service = AgentService(repository)
+
+    _enrollment, token = service.create_enrollment("agent-resource-dedupe")
+    agent, _ = service.enroll(token, "linux-host")
+
+    updated = service.heartbeat(
+        agent,
+        "linux-host",
+        [
+            type(
+                "Resource",
+                (),
+                {
+                    "resource_key": "/dev/ttyUSB0",
+                    "resource_type": "serial",
+                    "display_name": "ttyUSB0",
+                    "metadata": {},
+                    "available": True,
+                },
+            )(),
+            type(
+                "Resource",
+                (),
+                {
+                    "resource_key": "/dev/ttyUSB0",
+                    "resource_type": "serial",
+                    "display_name": "ttyUSB0 duplicate",
+                    "metadata": {},
+                    "available": True,
+                },
+            )(),
+        ],
+    )
+
+    assert len(updated.resources) == 1
+    assert updated.resources[0].display_name == "ttyUSB0"
+
+
+def test_heartbeat_rejects_malformed_resource_fields():
+    with pytest.raises(ValidationError):
+        AgentHeartbeat(
+            resources=[
+                {
+                    "resource_key": "   ",
+                    "resource_type": "serial",
+                    "display_name": "ttyUSB0",
+                }
+            ]
+        )
+
+    with pytest.raises(ValidationError):
+        AgentHeartbeat(
+            resources=[
+                {
+                    "resource_key": "x" * 256,
+                    "resource_type": "serial",
+                    "display_name": "ttyUSB0",
+                }
+            ]
+        )
+
+
+def test_stale_online_agent_transitions_to_offline_on_list():
+    repository = FakeRepository()
+    service = AgentService(repository)
+
+    _enrollment, token = service.create_enrollment("agent-stale")
+    agent, _ = service.enroll(token, "linux-host")
+    agent.last_seen_at = agent.last_seen_at - timedelta(seconds=120)
+
+    listed = service.list_agents()
+    assert listed[0].status == "offline"
+
+
+def test_offline_agent_reconnects_to_online_on_heartbeat():
+    repository = FakeRepository()
+    service = AgentService(repository)
+
+    _enrollment, token = service.create_enrollment("agent-reconnect")
+    agent, _ = service.enroll(token, "linux-host")
+    agent.status = "offline"
+    agent.last_seen_at = agent.last_seen_at - timedelta(seconds=120)
+
+    updated = service.heartbeat(agent, "linux-host", [])
+    assert updated.status == "online"
