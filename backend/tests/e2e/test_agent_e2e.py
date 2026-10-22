@@ -85,7 +85,9 @@ class Lab:
             **os.environ,
             "SECRET_KEY": secrets.token_hex(32),
             "ENVIRONMENT": "production",
-            "DATABASE_URL": f"sqlite:///{self.work / 'hub.sqlite3'}",
+            "DATABASE_URL": os.environ.get(
+                "TARGETHUB_TEST_DATABASE_URL", f"sqlite:///{self.work / 'hub.sqlite3'}"
+            ),
             "ADMIN_BOOTSTRAP_TOKEN": BOOTSTRAP_TOKEN,
             "TARGETHUB_PUBLIC_URL": self.base,
             "TARGETHUB_AGENT_OFFLINE_AFTER_SECONDS": str(OFFLINE_AFTER),

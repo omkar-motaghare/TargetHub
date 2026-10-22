@@ -165,10 +165,15 @@ def test_concurrent_overlapping_reservations_allow_exactly_one(tmp_path):
     from app.repositories.session_repository import SessionRepository
     from app.repositories.target_repository import TargetRepository
 
-    engine = create_engine(
-        f"sqlite:///{tmp_path / 'race.sqlite3'}",
-        connect_args={"check_same_thread": False, "timeout": 30},
-    )
+    pg_url = os.environ.get("TARGETHUB_TEST_DATABASE_URL")
+    if pg_url:
+        engine = create_engine(pg_url)
+        Base.metadata.drop_all(engine)
+    else:
+        engine = create_engine(
+            f"sqlite:///{tmp_path / 'race.sqlite3'}",
+            connect_args={"check_same_thread": False, "timeout": 30},
+        )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     with factory() as db:
@@ -193,4 +198,6 @@ def test_concurrent_overlapping_reservations_allow_exactly_one(tmp_path):
         results = list(pool.map(attempt, range(8)))
 
     assert results.count(True) == 1
+    if pg_url:
+        Base.metadata.drop_all(engine)
     engine.dispose()
