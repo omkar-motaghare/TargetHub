@@ -45,3 +45,16 @@ class SessionRepository:
         self.db.commit()
         self.db.refresh(session)
         return session
+
+    def close_active_for_reservation(self, reservation_id: str, now: datetime) -> int:
+        statement = select(TargetSession).where(
+            TargetSession.reservation_id == reservation_id,
+            TargetSession.status == "active",
+        )
+        sessions = list(self.db.scalars(statement).all())
+        for session in sessions:
+            session.status = "closed"
+            session.ended_at = now
+        if sessions:
+            self.db.commit()
+        return len(sessions)

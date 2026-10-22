@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     secret_key: str
     targethub_public_url: str = "http://localhost:8000"
 
+    # One-time first-admin bootstrap. Unset/empty disables bootstrap entirely.
+    admin_bootstrap_token: str | None = None
+
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=False,

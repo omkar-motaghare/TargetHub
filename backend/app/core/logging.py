@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -8,11 +9,38 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 logger.remove()
 
-logger.add(
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _default_enqueue() -> bool:
+    # Pytest and similarly constrained environments may forbid creating
+    # multiprocessing semaphores used by Loguru queue mode.
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return False
+    return True
+
+
+def _add_handler_with_fallback(*args, enqueue: bool, **kwargs) -> None:
+    try:
+        logger.add(*args, enqueue=enqueue, **kwargs)
+    except (PermissionError, OSError):
+        if enqueue:
+            logger.add(*args, enqueue=False, **kwargs)
+            return
+        raise
+
+
+LOG_ENQUEUE = _env_bool("TARGETHUB_LOG_ENQUEUE", _default_enqueue())
+
+_add_handler_with_fallback(
     sys.stdout,
     level="INFO",
     colorize=True,
-    enqueue=True,
+    enqueue=LOG_ENQUEUE,
     backtrace=True,
     diagnose=True,
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
@@ -21,12 +49,12 @@ logger.add(
     "<level>{message}</level>",
 )
 
-logger.add(
+_add_handler_with_fallback(
     LOG_DIR / "targethub.log",
     rotation="10 MB",
     retention="30 days",
     compression="zip",
-    enqueue=True,
+    enqueue=LOG_ENQUEUE,
     level="DEBUG",
     backtrace=True,
     diagnose=True,

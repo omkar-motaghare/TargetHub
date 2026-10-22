@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import and_, or_, update
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.models.reservation import Reservation

@@ -7,6 +7,7 @@ class SessionCreate(BaseModel):
     reservation_id: str = Field(min_length=1)
     user_id: str = Field(min_length=1, max_length=100)
     capability_type: str = Field(min_length=1, max_length=32)
+    capability_id: str | None = Field(default=None, min_length=1, max_length=36)
 
 
 class SessionResponse(BaseModel):
@@ -16,6 +17,9 @@ class SessionResponse(BaseModel):
     user_id: str
     capability_type: str
     provider_key: str | None = None
+    capability_id: str | None = None
+    agent_id: str | None = None
+    resource_id: str | None = None
     status: str
     expires_at: datetime
     ended_at: datetime | None = None

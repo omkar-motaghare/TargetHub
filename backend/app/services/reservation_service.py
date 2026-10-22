@@ -1,19 +1,26 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.core.exceptions import ConflictResource, ResourceNotFound
 from app.models.reservation import Reservation
 from app.repositories.reservation_repository import ReservationRepository
+from app.repositories.session_repository import SessionRepository
 from app.repositories.target_repository import TargetRepository
 
 
 class ReservationService:
-    def __init__(self, repository: ReservationRepository, target_repository: TargetRepository):
+    def __init__(
+        self,
+        repository: ReservationRepository,
+        target_repository: TargetRepository,
+        session_repository: SessionRepository,
+    ):
         self.repository = repository
         self.target_repository = target_repository
+        self.session_repository = session_repository
 
     def list_reservations(self, target_id: str | None = None, user_id: str | None = None):
-        self.repository.expire_due(datetime.now(timezone.utc))
+        self.repository.expire_due(datetime.now(UTC))
         return self.repository.list(target_id=target_id, user_id=user_id)
 
     def get_reservation(self, reservation_id: str):
@@ -44,9 +51,9 @@ class ReservationService:
         if ends_at <= starts_at:
             raise ConflictResource("ends_at must be after starts_at")
 
-        starts_at = starts_at.astimezone(timezone.utc)
-        ends_at = ends_at.astimezone(timezone.utc)
-        self.repository.expire_due(datetime.now(timezone.utc))
+        starts_at = starts_at.astimezone(UTC)
+        ends_at = ends_at.astimezone(UTC)
+        self.repository.expire_due(datetime.now(UTC))
 
         conflict = self.repository.find_overlapping_active(
             target_id,
@@ -78,8 +85,10 @@ class ReservationService:
                 f"Reservation '{reservation_id}' is already {reservation.status}"
             )
 
+        now = datetime.now(UTC)
         reservation.status = "released"
-        reservation.released_at = datetime.now(timezone.utc)
+        reservation.released_at = now
+        self.session_repository.close_active_for_reservation(reservation.id, now)
         return self.repository.update(reservation)
 
     def force_release_reservation(self, reservation_id: str):
@@ -88,6 +97,8 @@ class ReservationService:
             raise ConflictResource(
                 f"Reservation '{reservation_id}' is already {reservation.status}"
             )
+        now = datetime.now(UTC)
         reservation.status = "released"
-        reservation.released_at = datetime.now(timezone.utc)
+        reservation.released_at = now
+        self.session_repository.close_active_for_reservation(reservation.id, now)
         return self.repository.update(reservation)

@@ -10,9 +10,12 @@ from app.api.dependencies import (
     require_role,
     resolve_effective_user_id,
 )
+from app.repositories.audit_repository import AuditRepository
 from app.repositories.reservation_repository import ReservationRepository
+from app.repositories.session_repository import SessionRepository
 from app.repositories.target_repository import TargetRepository
 from app.schemas.reservation import ReservationCreate, ReservationResponse
+from app.services.audit_service import AuditService
 from app.services.reservation_service import ReservationService
 
 router = APIRouter(prefix="/reservations", tags=["Reservations"])
@@ -22,10 +25,18 @@ def get_service(db: Annotated[Session, Depends(get_db)]) -> ReservationService:
     return ReservationService(
         ReservationRepository(db),
         TargetRepository(db),
+        SessionRepository(db),
     )
 
 
 Service = Annotated[ReservationService, Depends(get_service)]
+
+
+def get_audit_service(db: Annotated[Session, Depends(get_db)]) -> AuditService:
+    return AuditService(AuditRepository(db))
+
+
+AuditDep = Annotated[AuditService, Depends(get_audit_service)]
 
 
 @router.get("", response_model=list[ReservationResponse])
@@ -60,28 +71,52 @@ def get_reservation(
 def create_reservation(
     request: ReservationCreate,
     service: Service,
+    audit: AuditDep,
     user=Depends(get_current_user),
 ):
     payload = request.model_dump()
     payload["user_id"] = resolve_effective_user_id(user, payload.get("user_id"))
-    return service.create_reservation(**payload)
+    reservation = service.create_reservation(**payload)
+    audit.record(
+        action="reservation.create",
+        user_id=reservation.user_id,
+        target_id=reservation.target_id,
+        detail=f"reservation {reservation.id}",
+    )
+    return reservation
 
 
 @router.post("/{reservation_id}/release", response_model=ReservationResponse)
 def release_reservation(
     reservation_id: str,
     service: Service,
+    audit: AuditDep,
     user_id: str | None = Query(default=None, min_length=1),
     user=Depends(get_current_user),
 ):
     effective_user_id = resolve_effective_user_id(user, user_id)
-    return service.release_reservation(reservation_id, effective_user_id)
+    reservation = service.release_reservation(reservation_id, effective_user_id)
+    audit.record(
+        action="reservation.release",
+        user_id=effective_user_id,
+        target_id=reservation.target_id,
+        detail=f"reservation {reservation.id}",
+    )
+    return reservation
 
 
 @router.post("/{reservation_id}/force-release", response_model=ReservationResponse)
 def force_release_reservation(
     reservation_id: str,
     service: Service,
-    _admin=Depends(require_role("admin")),
+    audit: AuditDep,
+    admin=Depends(require_role("admin")),
 ):
-    return service.force_release_reservation(reservation_id)
+    reservation = service.force_release_reservation(reservation_id)
+    audit.record(
+        action="reservation.force_release",
+        user_id=admin.username,
+        target_id=reservation.target_id,
+        detail=f"reservation {reservation.id}",
+    )
+    return reservation

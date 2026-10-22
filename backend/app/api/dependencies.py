@@ -1,8 +1,12 @@
 from collections.abc import Generator
+from typing import Annotated
 
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
+from app.services.auth_service import AuthService
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -12,13 +16,6 @@ def get_db() -> Generator[Session, None, None]:
     finally:
         db.close()
 
-
-from typing import Annotated
-
-from fastapi import Depends, HTTPException
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-
-from app.services.auth_service import AuthService
 
 bearer = HTTPBearer(auto_error=False)
 

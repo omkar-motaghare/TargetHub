@@ -9,6 +9,23 @@ class UserCreate(BaseModel):
     roles: list[str] = Field(default_factory=list)
 
 
+class UserUpdate(BaseModel):
+    roles: list[str] | None = None
+    password: str | None = Field(default=None, min_length=8)
+
+
+class ChangePasswordRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=100)
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=8)
+
+
+class AdminBootstrapRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=100)
+    password: str = Field(min_length=8)
+    bootstrap_token: str = Field(min_length=1)
+
+
 class UserResponse(BaseModel):
     id: int
     username: str

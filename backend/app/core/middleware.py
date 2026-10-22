@@ -4,6 +4,7 @@ import uuid
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.logging import logger
+from app.core.metrics import metrics
 
 
 class RequestMiddleware(BaseHTTPMiddleware):
@@ -19,6 +20,11 @@ class RequestMiddleware(BaseHTTPMiddleware):
         elapsed = (time.perf_counter() - start) * 1000
 
         response.headers["X-Request-ID"] = request_id
+
+        metrics.inc(
+            "targethub_http_requests_total",
+            labels={"method": request.method, "status": str(response.status_code)},
+        )
 
         logger.info(f"[{request_id}] <-- {response.status_code} ({elapsed:.2f} ms)")
 

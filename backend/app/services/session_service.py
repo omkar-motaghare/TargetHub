@@ -1,11 +1,12 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.core.exceptions import ConflictResource, ResourceNotFound
 from app.models.session import TargetSession
 from app.repositories.reservation_repository import ReservationRepository
 from app.repositories.session_repository import SessionRepository
 from app.repositories.target_repository import TargetRepository
+from app.services.capability_binding import validate_capability_runtime_binding
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -16,8 +17,8 @@ def _as_utc(value: datetime) -> datetime:
     UTC so reservation/session comparisons remain safe and deterministic.
     """
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 class SessionService:
@@ -34,18 +35,54 @@ class SessionService:
         self.target_repository = target_repository
 
     def list_sessions(self, user_id: str | None = None, target_id: str | None = None):
-        self.repository.expire_due(datetime.now(timezone.utc))
+        self.repository.expire_due(datetime.now(UTC))
         return self.repository.list(user_id=user_id, target_id=target_id)
 
     def get_session(self, session_id: str):
-        self.repository.expire_due(datetime.now(timezone.utc))
+        self.repository.expire_due(datetime.now(UTC))
         session = self.repository.get(session_id)
         if session is None:
             raise ResourceNotFound("Session", session_id)
         return session
 
-    def create_session(self, reservation_id: str, user_id: str, capability_type: str):
-        now = datetime.now(timezone.utc)
+    @staticmethod
+    def _resolve_capability(target, capability_type: str, capability_id: str | None):
+        if capability_id:
+            capability = next(
+                (item for item in target.capabilities if item.id == capability_id),
+                None,
+            )
+            if capability is None:
+                raise ConflictResource("Selected capability does not belong to the target")
+            if capability.capability_type != capability_type:
+                raise ConflictResource("Selected capability does not match capability_type")
+            if not capability.enabled:
+                raise ConflictResource("Selected capability is disabled")
+            return capability
+
+        matches = [
+            item
+            for item in target.capabilities
+            if item.capability_type == capability_type and item.enabled
+        ]
+        if not matches:
+            raise ConflictResource(
+                f"Target does not have an enabled '{capability_type}' capability"
+            )
+        if len(matches) > 1:
+            raise ConflictResource(
+                f"Target has multiple enabled '{capability_type}' capabilities; specify capability_id"
+            )
+        return matches[0]
+
+    def create_session(
+        self,
+        reservation_id: str,
+        user_id: str,
+        capability_type: str,
+        capability_id: str | None = None,
+    ):
+        now = datetime.now(UTC)
         self.reservation_repository.expire_due(now)
         reservation = self.reservation_repository.get(reservation_id)
         if reservation is None:
@@ -66,26 +103,19 @@ class SessionService:
         if not target.enabled:
             raise ConflictResource("Target is disabled")
 
-        capability = next(
-            (
-                item
-                for item in target.capabilities
-                if item.capability_type == capability_type and item.enabled
-            ),
-            None,
-        )
-        if capability is None:
-            raise ConflictResource(
-                f"Target does not have an enabled '{capability_type}' capability"
-            )
+        capability = self._resolve_capability(target, capability_type, capability_id)
+        validate_capability_runtime_binding(capability, now=now)
 
         session = TargetSession(
             id=str(uuid.uuid4()),
             reservation_id=reservation.id,
             target_id=target.id,
             user_id=user_id,
-            capability_type=capability_type,
+            capability_type=capability.capability_type,
             provider_key=capability.provider_key,
+            capability_id=capability.id,
+            agent_id=capability.agent_id,
+            resource_id=capability.resource_id,
             status="active",
             expires_at=reservation_ends_at,
         )
@@ -99,5 +129,5 @@ class SessionService:
             raise ConflictResource(f"Session '{session_id}' is already {session.status}")
 
         session.status = "closed"
-        session.ended_at = datetime.now(timezone.utc)
+        session.ended_at = datetime.now(UTC)
         return self.repository.update(session)
