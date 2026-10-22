@@ -39,3 +39,15 @@ coverage/
 *.db.before-*
 *.sqlite
 *.sqlite3
+
+# Runtime artifacts
+*.sqlite3-journal
+*.db-journal
+logs/
+.ruff_cache/
+.copilot/
+*.pdf
+backend/.env
+.e2e/
+*.vsix
+out/
