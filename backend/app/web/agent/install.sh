@@ -127,6 +127,7 @@ if [[ ! -f "$CONFIG_PATH" ]] || ! grep -q '"agent_id"' "$CONFIG_PATH"; then
   "heartbeat_interval": 15,
   "operation_poll_wait_seconds": 5,
   "request_timeout": 15,
+  "allow_insecure_http": $([[ "$ALLOW_INSECURE_HTTP" == "1" ]] && echo true || echo false),
   "resources": []
 }
 JSON

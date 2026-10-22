@@ -4,24 +4,42 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import logging
 import os
+import random
 import select
+import signal
 import socket
+import ssl
+import subprocess
 import sys
+import tempfile
 import termios
+import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from glob import glob
 from pathlib import Path
 from tty import setraw
+
+log = logging.getLogger("targethub-agent")
 
 DEFAULT_INTERVAL = 15
 DEFAULT_REQUEST_TIMEOUT = 15
 DEFAULT_OPERATION_POLL_WAIT_SECONDS = 5
 MAX_RETRY_DELAY = 120
 MAX_SERIAL_READ_SIZE = 65536
+MAX_USB_DEVICES = 32
+MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
+DEFAULT_DEPLOY_TIMEOUT = 300
+DEFAULT_GPIO_BASE = "/sys/class/gpio"
+
+_ssl_context: ssl.SSLContext | None = None
+_stop = threading.Event()
 
 _BAUD_TO_TERM = {
     9600: termios.B9600,
@@ -45,6 +63,37 @@ def save_config(path: Path, config: dict) -> None:
     temporary.replace(path)
 
 
+def configure_tls(config: dict) -> None:
+    """Use a custom CA bundle for the hub when configured; default verification stays on."""
+    global _ssl_context
+    ca_bundle = config.get("ca_bundle")
+    _ssl_context = ssl.create_default_context(cafile=ca_bundle) if ca_bundle else None
+
+
+def validate_hub_url(config: dict, allow_insecure: bool) -> None:
+    url = str(config.get("targethub_url", ""))
+    if url.startswith("https://"):
+        return
+    if url.startswith("http://") and (allow_insecure or config.get("allow_insecure_http")):
+        log.warning("using plain http to reach TargetHub; credentials are not protected")
+        return
+    raise RuntimeError("targethub_url must be https:// (use allow_insecure_http or --insecure for lab testing)")
+
+
+def sd_notify(message: str) -> None:
+    address = os.environ.get("NOTIFY_SOCKET")
+    if not address:
+        return
+    if address.startswith("@"):
+        address = "\0" + address[1:]
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+            sock.connect(address)
+            sock.sendall(message.encode("utf-8"))
+    except OSError as exc:
+        log.debug("sd_notify failed: %s", exc)
+
+
 def api_request(
     url: str,
     payload: dict,
@@ -59,7 +108,7 @@ def api_request(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout, context=_ssl_context) as response:
             body = response.read().decode("utf-8")
             return json.loads(body) if body else {}
     except urllib.error.HTTPError as exc:
@@ -72,6 +121,40 @@ def api_request(
 def ensure_linux() -> None:
     if sys.platform != "linux":
         raise RuntimeError("TargetHub Agent currently supports Linux hosts only")
+
+
+def _read_sysfs_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def discover_usb_devices(hostname: str) -> list[dict]:
+    devices: list[dict] = []
+    for path in sorted(glob("/sys/bus/usb/devices/*")):
+        entry = Path(path)
+        vendor_id = _read_sysfs_text(entry / "idVendor")
+        if not vendor_id or entry.name.startswith("usb"):
+            continue
+        product = _read_sysfs_text(entry / "product") or entry.name
+        devices.append(
+            {
+                "resource_key": f"usb:{entry.name}",
+                "resource_type": "usb_device",
+                "display_name": product,
+                "metadata": {
+                    "vendor_id": vendor_id,
+                    "product_id": _read_sysfs_text(entry / "idProduct"),
+                    "product": product,
+                    "hostname": hostname,
+                },
+                "available": True,
+            }
+        )
+        if len(devices) >= MAX_USB_DEVICES:
+            break
+    return devices
 
 
 def discover_resources(config: dict) -> list[dict]:
@@ -123,6 +206,19 @@ def discover_resources(config: dict) -> list[dict]:
                 "available": True,
             }
         )
+
+    for path in sorted(glob("/dev/gpiochip*")):
+        resources.append(
+            {
+                "resource_key": f"gpio:{Path(path).name}",
+                "resource_type": "gpio_chip",
+                "display_name": Path(path).name,
+                "metadata": {"path": path, "hostname": hostname},
+                "available": True,
+            }
+        )
+
+    resources.extend(discover_usb_devices(hostname))
 
     for item in config.get("resources", []):
         resources.append(
@@ -180,7 +276,7 @@ def enroll(config: dict, config_path: Path, request_timeout: int = DEFAULT_REQUE
     config["credential"] = result["credential"]
     config.pop("enrollment_token", None)
     save_config(config_path, config)
-    print(f"Enrolled Agent {config['agent_id']}")
+    log.info("Enrolled Agent %s", config["agent_id"])
 
 
 def heartbeat(config: dict, request_timeout: int = DEFAULT_REQUEST_TIMEOUT) -> None:
@@ -291,6 +387,14 @@ class SerialRuntime:
         size = int(params.get("size", 4096))
         return max(1, min(size, MAX_SERIAL_READ_SIZE))
 
+    def close_all(self) -> None:
+        for fd in self._open_fds.values():
+            try:
+                os.close(fd)
+            except OSError as exc:
+                log.debug("serial close failed: %s", exc)
+        self._open_fds.clear()
+
     def execute(self, operation_payload: dict) -> dict:
         operation = str(operation_payload.get("operation", "")).strip().lower()
         params = operation_payload.get("params") or {}
@@ -372,8 +476,8 @@ class SerialRuntime:
                 return {"success": True, "message": "Serial connection already closed", "data": {"path": path}}
             try:
                 os.close(fd)
-            except OSError:
-                pass
+            except OSError as exc:
+                log.debug("serial close failed: %s", exc)
             return {"success": True, "message": "Serial connection closed", "data": {"path": path}}
 
         fd = self._open_fds.get(key)
@@ -415,13 +519,248 @@ class SerialRuntime:
         return {"success": False, "message": f"Unsupported serial operation '{operation}'"}
 
 
+class SysfsGpio:
+    """GPIO output lines through the (deprecated but universal) sysfs interface."""
+
+    def __init__(self, base: str) -> None:
+        self.base = Path(base)
+
+    def _line_dir(self, line: int) -> Path:
+        return self.base / f"gpio{line}"
+
+    def write(self, line: int, level: int) -> None:
+        line_dir = self._line_dir(line)
+        if not line_dir.exists():
+            (self.base / "export").write_text(str(line), encoding="utf-8")
+        direction_path = line_dir / "direction"
+        if _read_sysfs_text(direction_path) != "out":
+            # "high"/"low" set the direction and initial level together, avoiding a glitch.
+            direction_path.write_text("high" if level else "low", encoding="utf-8")
+        (line_dir / "value").write_text("1" if level else "0", encoding="utf-8")
+
+    def read(self, line: int) -> int:
+        return int(_read_sysfs_text(self._line_dir(line) / "value") or 0)
+
+
+class GpiodCli:
+    """GPIO output lines held by a long-running libgpiod `gpioset` process per line."""
+
+    def __init__(self, chip: str, version: int) -> None:
+        self.chip = chip
+        self.version = version
+        self._procs: dict[int, subprocess.Popen] = {}
+        self._levels: dict[int, int] = {}
+
+    def _command(self, line: int, level: int) -> list[str]:
+        if self.version == 1:
+            return ["gpioset", "--mode=signal", self.chip, f"{line}={level}"]
+        return ["gpioset", "--chip", self.chip, f"{line}={level}"]
+
+    def write(self, line: int, level: int) -> None:
+        self._release(line)
+        self._procs[line] = subprocess.Popen(
+            self._command(line, level),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self._levels[line] = level
+
+    def read(self, line: int) -> int:
+        return self._levels.get(line, 0)
+
+    def _release(self, line: int) -> None:
+        proc = self._procs.pop(line, None)
+        if proc is not None:
+            proc.terminate()
+            proc.wait(timeout=5)
+
+
+class PowerRuntime:
+    """Relay/reset-line control for resources defined in the local Agent config."""
+
+    def __init__(self) -> None:
+        self._gpiod: dict[tuple[str, int], GpiodCli] = {}
+
+    def _backend(self, metadata: dict):
+        backend = str(metadata.get("backend", "sysfs"))
+        if backend == "sysfs":
+            return SysfsGpio(str(metadata.get("gpio_base", DEFAULT_GPIO_BASE)))
+        if backend == "gpiod":
+            chip = str(metadata.get("chip", "gpiochip0"))
+            version = int(metadata.get("gpiod_version", 2))
+            return self._gpiod.setdefault((chip, version), GpiodCli(chip, version))
+        raise ValueError(f"Unsupported GPIO backend '{backend}'")
+
+    @staticmethod
+    def _pulse_seconds(metadata: dict) -> float:
+        return max(0.05, min(float(metadata.get("pulse_seconds", 0.5)), 10.0))
+
+    def execute(self, operation: str, metadata: dict) -> dict:
+        try:
+            gpio = self._backend(metadata)
+            line = int(metadata["line"])
+        except (KeyError, TypeError, ValueError) as exc:
+            return {"success": False, "message": f"Invalid power resource configuration: {exc}"}
+        active_low = bool(metadata.get("active_low", False))
+
+        def level_for(on: bool) -> int:
+            return 0 if on == active_low else 1
+
+        try:
+            if operation == "status":
+                is_on = (gpio.read(line) == 1) != active_low
+                return {"success": True, "message": "Power status", "data": {"state": "on" if is_on else "off"}}
+            if operation in {"on", "off"}:
+                gpio.write(line, level_for(operation == "on"))
+                return {"success": True, "message": f"Power {operation}", "data": {"state": operation}}
+            if operation in {"reset", "cycle"}:
+                pulse = self._pulse_seconds(metadata)
+                is_reset_line = metadata.get("kind") == "reset_line"
+                gpio.write(line, level_for(is_reset_line))
+                time.sleep(pulse)
+                gpio.write(line, level_for(not is_reset_line))
+                final_state = "off" if is_reset_line else "on"
+                return {"success": True, "message": f"Power {operation} complete", "data": {"state": final_state}}
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {"success": False, "message": f"GPIO operation failed: {exc}"}
+        return {"success": False, "message": f"Unsupported power operation '{operation}'"}
+
+
+class DeployRuntime:
+    """Download a checksummed artifact and hand it to an operator-configured command."""
+
+    def __init__(self) -> None:
+        self._last: dict = {}
+
+    @staticmethod
+    def _download(url: str, destination: Path, allow_http: bool) -> str:
+        scheme = urllib.parse.urlparse(url).scheme
+        if scheme != "https" and not (scheme == "http" and allow_http):
+            raise ValueError("Artifact URL must use https")
+        digest = hashlib.sha256()
+        size = 0
+        with urllib.request.urlopen(url, timeout=DEFAULT_REQUEST_TIMEOUT, context=_ssl_context) as response:
+            with destination.open("wb") as handle:
+                while True:
+                    chunk = response.read(65536)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > MAX_ARTIFACT_BYTES:
+                        raise ValueError("Artifact exceeds the maximum allowed size")
+                    digest.update(chunk)
+                    handle.write(chunk)
+        return digest.hexdigest()
+
+    def execute(self, operation: str, params: dict, metadata: dict) -> dict:
+        if operation == "status":
+            return {"success": True, "message": "Last deployment", "data": dict(self._last) or {"status": "none"}}
+        if operation != "deploy":
+            return {"success": False, "message": f"Unsupported deploy operation '{operation}'"}
+
+        command = metadata.get("command")
+        if not isinstance(command, list) or not command or not all(isinstance(part, str) for part in command):
+            return {"success": False, "message": "Deploy resource has no command configured on this Agent"}
+        url = str(params.get("url", ""))
+        expected = str(params.get("sha256", "")).lower()
+        timeout = max(5, min(int(metadata.get("timeout", DEFAULT_DEPLOY_TIMEOUT)), 3600))
+
+        with tempfile.TemporaryDirectory(prefix="targethub-deploy-") as workdir:
+            artifact = Path(workdir) / "artifact.bin"
+            try:
+                actual = self._download(url, artifact, bool(metadata.get("allow_http")))
+            except (OSError, ValueError, urllib.error.URLError) as exc:
+                return {"success": False, "message": f"Artifact download failed: {exc}"}
+            if actual != expected:
+                return {"success": False, "message": "Artifact sha256 mismatch; refusing to deploy"}
+            args = [part.replace("{artifact}", str(artifact)) for part in command]
+            try:
+                completed = subprocess.run(
+                    args, cwd=workdir, capture_output=True, text=True, timeout=timeout, check=False
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                return {"success": False, "message": f"Deploy command failed to run: {exc}"}
+
+        output = (completed.stdout + completed.stderr)[-2000:]
+        self._last = {"status": "ok" if completed.returncode == 0 else "failed", "sha256": actual}
+        return {
+            "success": completed.returncode == 0,
+            "message": "Deployment complete" if completed.returncode == 0 else f"Deploy command exited {completed.returncode}",
+            "data": {**self._last, "returncode": completed.returncode, "output": output},
+        }
+
+
+class OperationRouter:
+    """Dispatch hub operations to the runtime for their resource type."""
+
+    def __init__(self, config: dict) -> None:
+        self.config = config
+        self.serial = SerialRuntime()
+        self.power = PowerRuntime()
+        self.deploy = DeployRuntime()
+
+    def _local_metadata(self, resource_key: str) -> dict | None:
+        # Power/deploy settings come from the local config only; the hub's copy is not trusted.
+        for item in self.config.get("resources", []):
+            if item.get("resource_key") == resource_key:
+                return item.get("metadata") or {}
+        return None
+
+    def execute(self, payload: dict) -> dict:
+        resource_type = str(payload.get("resource_type", ""))
+        operation = str(payload.get("operation", "")).strip().lower()
+        params = payload.get("params") or {}
+        if resource_type == "serial":
+            return self.serial.execute(payload)
+        if resource_type in {"power", "reset", "deploy"}:
+            metadata = self._local_metadata(str(payload.get("resource_key", "")))
+            if metadata is None:
+                return {"success": False, "message": "Resource is not configured on this Agent"}
+            if resource_type == "deploy":
+                return self.deploy.execute(operation, params, metadata)
+            return self.power.execute(operation, metadata)
+        return {"success": False, "message": f"Unsupported resource type '{resource_type}'"}
+
+
+def run_operation(config: dict, router: OperationRouter, operation: dict, request_timeout: int) -> None:
+    try:
+        execution = router.execute(operation)
+        complete_operation(
+            config,
+            operation_id=str(operation["id"]),
+            success=bool(execution.get("success")),
+            message=str(execution.get("message", "")),
+            data=execution.get("data") if isinstance(execution.get("data"), dict) else {},
+            request_timeout=request_timeout,
+        )
+    except Exception as exc:  # the hub times the operation out if completion is never reported
+        log.warning(_redact(f"operation {operation.get('id')} failed: {exc}", [str(config.get("credential", ""))]))
+
+
+def _jittered(delay: int) -> float:
+    return delay * random.uniform(0.5, 1.0)
+
+
+def _handle_stop(_signum: int, _frame: object) -> None:
+    _stop.set()
+
+
 def main() -> int:
     ensure_linux()
     parser = argparse.ArgumentParser(description="TargetHub Agent")
     parser.add_argument("--config", default="/etc/targethub-agent/config.json")
+    parser.add_argument("--insecure", action="store_true", help="allow a plain http:// TargetHub URL")
     args = parser.parse_args()
+    # journald captures stderr and adds timestamps.
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", stream=sys.stderr)
+    signal.signal(signal.SIGTERM, _handle_stop)
+    signal.signal(signal.SIGINT, _handle_stop)
+
     config_path = Path(args.config)
     config = load_config(config_path)
+    validate_hub_url(config, args.insecure)
+    configure_tls(config)
     interval = max(5, int(config.get("heartbeat_interval", DEFAULT_INTERVAL)))
     request_timeout = max(5, int(config.get("request_timeout", DEFAULT_REQUEST_TIMEOUT)))
     operation_poll_wait_seconds = max(
@@ -432,39 +771,45 @@ def main() -> int:
         ),
     )
 
-    if config.get("enrollment_token"):
-        enrollment_delay = 0
-        while config.get("enrollment_token"):
-            try:
-                enroll(config, config_path, request_timeout=request_timeout)
-            except Exception as exc:
-                if _is_fatal_enrollment_error(exc):
-                    print("enrollment failed permanently; create a new enrollment token", file=sys.stderr)
-                    return 1
-                enrollment_delay = _next_retry_delay(enrollment_delay)
-                print(
-                    _redact(
-                        f"enrollment error: {exc}; retrying in {enrollment_delay}s",
-                        [str(config.get("enrollment_token", ""))],
-                    ),
-                    file=sys.stderr,
+    enrollment_delay = 0
+    while config.get("enrollment_token") and not _stop.is_set():
+        try:
+            enroll(config, config_path, request_timeout=request_timeout)
+        except Exception as exc:
+            if _is_fatal_enrollment_error(exc):
+                log.error("enrollment failed permanently; create a new enrollment token")
+                return 1
+            enrollment_delay = _next_retry_delay(enrollment_delay)
+            log.warning(
+                _redact(
+                    f"enrollment error: {exc}; retrying in {enrollment_delay}s",
+                    [str(config.get("enrollment_token", ""))],
                 )
-                time.sleep(enrollment_delay)
-            else:
-                enrollment_delay = 0
+            )
+            _stop.wait(_jittered(enrollment_delay))
 
+    if _stop.is_set():
+        return 0
     if not config.get("agent_id") or not config.get("credential"):
         raise RuntimeError("Agent is not enrolled. Provide an enrollment token in the configuration.")
 
-    print(f"TargetHub Agent running as {config['agent_id']}")
-    serial_runtime = SerialRuntime()
+    log.info("TargetHub Agent running as %s", config["agent_id"])
+    sd_notify("READY=1")
+    router = OperationRouter(config)
     failure_delay = 0
     next_heartbeat_due = 0.0
-    while True:
+    worker: threading.Thread | None = None
+    while not _stop.is_set():
+        sd_notify("WATCHDOG=1")
         try:
             if time.monotonic() >= next_heartbeat_due:
                 heartbeat(config, request_timeout=request_timeout)
                 next_heartbeat_due = time.monotonic() + interval
+
+            if worker is not None and worker.is_alive():
+                # An operation is running: keep heartbeating but do not claim another.
+                _stop.wait(1)
+                continue
 
             poll_timeout = max(request_timeout, operation_poll_wait_seconds + 5)
             poll_result = poll_operation(
@@ -474,15 +819,12 @@ def main() -> int:
             )
             operation = poll_result.get("operation")
             if operation:
-                execution = serial_runtime.execute(operation)
-                complete_operation(
-                    config,
-                    operation_id=str(operation["id"]),
-                    success=bool(execution.get("success")),
-                    message=str(execution.get("message", "")),
-                    data=execution.get("data") if isinstance(execution.get("data"), dict) else {},
-                    request_timeout=request_timeout,
+                worker = threading.Thread(
+                    target=run_operation,
+                    args=(config, router, operation, request_timeout),
+                    daemon=True,
                 )
+                worker.start()
             failure_delay = 0
         except Exception as exc:  # keep the service alive through transient failures
             failure_delay = _next_retry_delay(failure_delay)
@@ -490,14 +832,20 @@ def main() -> int:
                 str(config.get("credential", "")),
                 str(config.get("enrollment_token", "")),
             ]
-            print(
+            log.warning(
                 _redact(
                     f"heartbeat/operation error: {exc}; retrying in {failure_delay}s",
                     secrets,
-                ),
-                file=sys.stderr,
+                )
             )
-            time.sleep(failure_delay)
+            _stop.wait(_jittered(failure_delay))
+
+    if worker is not None:
+        worker.join(timeout=10)
+    sd_notify("STOPPING=1")
+    router.serial.close_all()
+    log.info("TargetHub Agent stopped")
+    return 0
 
 
 if __name__ == "__main__":
