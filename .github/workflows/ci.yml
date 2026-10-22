@@ -26,6 +26,10 @@ jobs:
         env:
           SECRET_KEY: ci-test-secret
         run: backend/.venv/bin/python -m pytest -q backend/tests/
+      - name: Live agent E2E
+        env:
+          SECRET_KEY: ci-test-secret
+        run: bash scripts/e2e-agent.sh
 
   frontend:
     name: Frontend build

@@ -159,7 +159,10 @@ class AgentOperationService:
             if operation is not None:
                 if self._is_operation_session_valid(operation, now):
                     floor = FAMILY_TIMEOUT_FLOOR_SECONDS.get(self.family_for(operation.resource_type) or "", 0.0)
-                    if floor and (operation.lease_expires_at is None or operation.lease_expires_at < now + timedelta(seconds=floor)):
+                    if floor and (
+                        operation.lease_expires_at is None
+                        or _as_utc(operation.lease_expires_at) < now + timedelta(seconds=floor)
+                    ):
                         operation.lease_expires_at = now + timedelta(seconds=floor)
                         self.operation_repository.save(operation)
                     return operation

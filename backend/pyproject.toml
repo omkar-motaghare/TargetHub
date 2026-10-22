@@ -46,3 +46,7 @@ profile = "black"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
 ignore = ["B008", "E501"]
+
+[tool.pytest.ini_options]
+markers = ["e2e: live hub + real agent process end-to-end run (slow)"]
+addopts = "-m 'not e2e'"
