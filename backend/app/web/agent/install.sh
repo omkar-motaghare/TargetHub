@@ -63,12 +63,23 @@ if [[ "$(uname -s)" != "Linux" ]]; then
   exit 1
 fi
 
-for tool in python3 curl sha256sum; do
+for tool in python3 sha256sum; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "$tool is required." >&2
     exit 1
   fi
 done
+
+# Minimal images (Yocto/BusyBox) often lack curl; fall back to wget, then python3.
+download() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$1" -o "$2"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -O "$2" "$1"
+  else
+    python3 -c "import sys,urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" "$1" "$2"
+  fi
+}
 
 if [[ -z "$PREFIX" ]] && ! command -v systemctl >/dev/null 2>&1; then
   echo "systemd/systemctl is required for the TargetHub Agent service." >&2
@@ -95,7 +106,7 @@ trap cleanup_on_error ERR
 
 mkdir -p "$BASE_DIR" "$CONFIG_DIR" "$(dirname "$UNIT_FILE")"
 
-curl -fsSL "${TARGETHUB_URL%/}/web/agent/targethub_agent.py" -o "$TEMP_AGENT_PATH"
+download "${TARGETHUB_URL%/}/web/agent/targethub_agent.py" "$TEMP_AGENT_PATH"
 ACTUAL_SHA256="$(sha256sum "$TEMP_AGENT_PATH" | cut -d' ' -f1)"
 if [[ "${ACTUAL_SHA256,,}" != "${AGENT_SHA256,,}" ]]; then
   echo "Agent checksum mismatch (expected ${AGENT_SHA256}, got ${ACTUAL_SHA256}); aborting." >&2
@@ -108,11 +119,19 @@ mv "$TEMP_AGENT_PATH" "$AGENT_PATH"
 
 if [[ -z "$PREFIX" ]]; then
   if ! id "$SERVICE_USER" >/dev/null 2>&1; then
-    useradd --system --home-dir "$BASE_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
+    if command -v useradd >/dev/null 2>&1; then
+      useradd --system --home-dir "$BASE_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
+    else
+      adduser -S -D -H -h "$BASE_DIR" -s /sbin/nologin "$SERVICE_USER"
+    fi
   fi
   for group in dialout gpio plugdev; do
-    if getent group "$group" >/dev/null 2>&1; then
-      usermod -aG "$group" "$SERVICE_USER"
+    if grep -q "^${group}:" /etc/group; then
+      if command -v usermod >/dev/null 2>&1; then
+        usermod -aG "$group" "$SERVICE_USER"
+      else
+        addgroup "$SERVICE_USER" "$group"
+      fi
     fi
   done
 fi

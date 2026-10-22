@@ -5,6 +5,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import pytest
+
 
 def _load_runtime_module():
     runtime_path = (
@@ -274,3 +276,19 @@ def test_save_config_writes_mode_0600(tmp_path):
     runtime.save_config(path, {"targethub_url": "http://example.local"})
     mode = os.stat(path).st_mode & 0o777
     assert mode == 0o600
+
+
+def test_enroll_does_not_spend_token_when_config_is_unwritable(tmp_path, monkeypatch):
+    runtime = _load_runtime_module()
+    calls = []
+    monkeypatch.setattr(runtime, "api_request", lambda *args, **kwargs: calls.append(args))
+
+    def refuse(path, config):
+        raise PermissionError("read-only")
+
+    monkeypatch.setattr(runtime, "save_config", refuse)
+    config = {"targethub_url": "http://hub.local", "enrollment_token": "enroll_x"}
+    with pytest.raises(PermissionError):
+        runtime.enroll(config, tmp_path / "agent.json")
+    assert calls == []
+    assert config["enrollment_token"] == "enroll_x"

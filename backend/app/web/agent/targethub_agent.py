@@ -264,6 +264,8 @@ def enroll(config: dict, config_path: Path, request_timeout: int = DEFAULT_REQUE
     if not token:
         return
 
+    # The token is single use: prove the credential can be persisted before spending it.
+    save_config(config_path, config)
     result = api_request(
         f"{targethub_url}/api/v1/agents/enroll",
         {
