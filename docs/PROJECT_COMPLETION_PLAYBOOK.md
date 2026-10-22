@@ -805,48 +805,48 @@ Do not share TargetHub as production-ready until every required item is checked.
 - [ ] Architecture documentation matches the implementation.
 - [ ] No required runtime file is untracked.
 - [ ] No credentials or local absolute paths are committed.
-- [ ] Simulated providers are clearly identified.
+- [ ] Simulated providers are clearly identified. (not re-audited in v0.1.0)
 
 ### Security
 
 - [ ] First-admin bootstrap is explicit and protected.
 - [ ] User creation is authorized after bootstrap.
 - [ ] Every route has a documented authorization decision.
-- [ ] Passwords are hashed with an approved password hashing scheme.
-- [ ] Tokens expire and are revocable where applicable.
+- [x] Passwords are hashed with an approved password hashing scheme.
+- [x] Tokens expire (15 min access tokens); agent credentials are revocable. User token revocation is not implemented.
 - [ ] Agent credentials are hashed at rest and never logged.
 - [ ] Logs and audit details redact secrets.
-- [ ] TLS/reverse-proxy deployment guidance exists.
+- [x] TLS/reverse-proxy deployment guidance exists.
 
 ### Data and operations
 
-- [ ] Fresh database migration passes.
-- [ ] Upgrade migration passes on a representative existing database.
-- [ ] Backup and restore have been tested.
-- [ ] Health and readiness endpoints work.
+- [x] Fresh database migration passes.
+- [ ] Upgrade migration passes on a representative existing database. (NOT verified)
+- [x] Backup and restore have been tested.
+- [x] Health and readiness endpoints work.
 - [ ] Persistent volumes are configured.
 - [ ] Startup does not destroy existing data.
-- [ ] Agent offline and reconnect behavior is tested.
+- [x] Agent offline and reconnect behavior is tested.
 
 ### Functional behavior
 
 - [ ] Target and capability CRUD works.
 - [ ] Capability-to-Agent-resource mapping is validated.
-- [ ] Reservation conflict handling works under concurrent requests.
+- [x] Reservation conflict handling works under concurrent requests.
 - [ ] Session ownership and expiry are enforced.
 - [ ] Provider operations require an active authorized session.
-- [ ] At least one real hardware vertical slice works.
-- [ ] Remaining simulations are documented as deferred or development-only.
+- [ ] At least one real hardware vertical slice works. (NOT verified: only pty serial + fake GPIO on a dev host; no real Pi)
+- [ ] Remaining simulations are documented as deferred or development-only. (not re-audited in v0.1.0)
 
 ### Quality and release
 
-- [ ] Backend tests pass in a clean environment.
-- [ ] Frontend build passes, or the experimental frontend is explicitly archived.
-- [ ] Lint and compile checks pass.
-- [ ] API/e2e smoke test passes.
-- [ ] CI reproduces local validation.
-- [ ] Release notes exist.
-- [ ] Installation, troubleshooting, and rollback docs are complete.
+- [x] Backend tests pass (154 passed in the existing backend/.venv; fresh-venv bootstrap not re-run).
+- [x] Frontend build passes, or the experimental frontend is explicitly archived.
+- [x] Lint and compile checks pass.
+- [x] API/e2e smoke test passes.
+- [ ] CI reproduces local validation. (workflow written; not yet run on GitHub)
+- [x] Release notes exist.
+- [ ] Installation, troubleshooting, and rollback docs are complete. (install + Pi + backup/TLS docs exist; troubleshooting/rollback incomplete)
 
 ---
 

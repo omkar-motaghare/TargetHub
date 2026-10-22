@@ -43,7 +43,15 @@ M5 — Hardening, CI/CD, release
 - Tasks: Add unit/integration tests, CI pipeline (lint, tests, build), Docker image tagging and release notes.
 - Acceptance: CI passing; reproducible Docker image build and published artifact pipeline.
 
-Next steps (immediate)
+Status update (2026-10-22, v0.1.0)
+----------------------------------
+- M1 Auth/RBAC, M2 session gating: done and covered by backend tests.
+- M3 UI/provider ecosystem: React UI with serial terminal, power/deploy panels, admin pages; GPIO power and deploy providers via the agent. Done on a dev host (no real hardware).
+- M4 Observability: request-id logs, `/metrics`, health endpoints, audit filters, backup/restore, TLS overlay. Done. Grafana dashboards not provided.
+- M5 Hardening/release: CI workflow written (not yet run on GitHub); local tag v0.1.0. Docker image publishing is not set up.
+- Post-0.1 work: real Raspberry Pi validation, upgrade-migration test on real data, react-router v7 / vitest upgrades, Postgres exclusion constraint for reservations, user token revocation, hide agent/resource ids from session owners.
+
+Next steps (historical, superseded by the update above)
 - Begin M1/M2 revalidation after the backend dependency environment is available.
 - Establish reproducible local test setup before relying on backend test results; the Phase 0 audit found SQLAlchemy missing from the current environment.
 

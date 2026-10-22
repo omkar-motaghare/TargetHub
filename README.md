@@ -6,7 +6,7 @@
 
 TargetHub is an open-source **Embedded Lab Orchestration Platform** that enables engineering teams to efficiently manage shared embedded hardware through a unified interface. It provides target reservation, exclusive hardware access, power control, serial console, firmware deployment, debugger integration, and lab automation—eliminating resource conflicts while improving developer productivity.
 
-> 🚧 **Project Status:** Working Prototype (Core platform + authenticated workflow, React frontend migration in progress)
+> 🚧 **Project Status:** v0.1.0 (local release candidate) — hub, Raspberry Pi/Linux agent, React UI, Python SDK/CLI and VS Code extension are implemented and tested on a Linux dev host. No real Raspberry Pi hardware has been tested yet. See [CHANGELOG](CHANGELOG.md), [Raspberry Pi install](docs/agents/raspberry-pi.md) and [backup/TLS docs](docs/deployment/backup.md).
 
 ---
 
