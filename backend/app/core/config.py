@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # One-time first-admin bootstrap. Unset/empty disables bootstrap entirely.
     admin_bootstrap_token: str | None = None
 
+    # Failed logins / password changes allowed per client IP + username within the window.
+    auth_max_failures: int = 5
+    auth_failure_window_seconds: int = 300
     @model_validator(mode="after")
     def reject_weak_secret_key(self) -> "Settings":
         if self.environment.lower() in DEV_ENVIRONMENTS:

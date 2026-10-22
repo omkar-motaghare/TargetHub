@@ -715,3 +715,50 @@ def test_audit_filters_by_user_target_session_and_action(client, admin_token):
     assert len(fetch(action="session.open")) == 2
     assert len(fetch(action="session.close")) == 1
     assert fetch(user_id="alice", action="session.close")[0]["target_id"] == "t1"
+
+
+# --- Brute-force protection -------------------------------------------------
+
+
+def failed_login(client, username="admin", password="wrong-password"):
+    return client.post("/api/v1/auth/token", data={"username": username, "password": password})
+
+
+def test_login_locks_out_after_repeated_failures(client, monkeypatch):
+    monkeypatch.setattr(settings, "auth_max_failures", 3)
+    bootstrap_admin(client)
+    assert [failed_login(client).status_code for _ in range(3)] == [401, 401, 401]
+
+    blocked = failed_login(client)
+    assert blocked.status_code == 429
+    assert int(blocked.headers["Retry-After"]) >= 1
+    # The correct password is refused too while locked out.
+    assert failed_login(client, password="admin12345").status_code == 429
+
+
+def test_lockout_is_per_username_and_success_resets_counter(client, monkeypatch):
+    monkeypatch.setattr(settings, "auth_max_failures", 3)
+    bootstrap_admin(client)
+    for _ in range(2):
+        assert failed_login(client).status_code == 401
+    assert failed_login(client, password="admin12345").status_code == 200
+    # Counter was reset, so two more failures do not lock the account.
+    assert [failed_login(client).status_code for _ in range(2)] == [401, 401]
+    # Another username from the same IP is unaffected.
+    assert failed_login(client, username="someone-else").status_code == 401
+
+
+def test_change_password_is_rate_limited(client, monkeypatch):
+    monkeypatch.setattr(settings, "auth_max_failures", 2)
+    bootstrap_admin(client)
+    payload = {"username": "admin", "current_password": "wrong-password", "new_password": "new-password-123"}
+    assert client.post("/api/v1/auth/change-password", json=payload).status_code == 401
+    assert client.post("/api/v1/auth/change-password", json=payload).status_code == 401
+    assert client.post("/api/v1/auth/change-password", json=payload).status_code == 429
+
+
+def test_bootstrap_token_guessing_is_rate_limited(client, monkeypatch):
+    monkeypatch.setattr(settings, "auth_max_failures", 2)
+    assert bootstrap_admin(client, token="guess-1").status_code == 401
+    assert bootstrap_admin(client, token="guess-2").status_code == 401
+    assert bootstrap_admin(client, token="guess-3").status_code == 429

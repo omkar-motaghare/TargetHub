@@ -1,12 +1,13 @@
 import hmac
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_db, require_role
 from app.core.config import settings
+from app.core.rate_limit import enforce_auth_limit, record_auth_failure, record_auth_success
 from app.schemas.user import (
     AdminBootstrapRequest,
     ChangePasswordRequest,
@@ -26,12 +27,17 @@ def get_auth_service(db: Annotated[Session, Depends(get_db)]) -> AuthService:
 
 @router.post("/token", response_model=Token)
 def login_for_access_token(
+    request: Request,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     auth: AuthService = Depends(get_auth_service),
 ):
+    client_ip = request.client.host if request.client else None
+    enforce_auth_limit(client_ip, form_data.username, settings.auth_max_failures, settings.auth_failure_window_seconds)
     user = auth.authenticate(form_data.username, form_data.password)
     if not user:
+        record_auth_failure(client_ip, form_data.username)
         raise HTTPException(status_code=401, detail="Incorrect username or password")
+    record_auth_success(client_ip, form_data.username)
     roles = (user.roles or "").split(",") if user.roles else []
     token = auth.create_access_token(user.username, roles)
     return {"access_token": token, "token_type": "bearer"}
@@ -39,19 +45,25 @@ def login_for_access_token(
 
 @router.post("/change-password", status_code=204)
 def change_password(
+    http_request: Request,
     request: ChangePasswordRequest,
     auth: AuthService = Depends(get_auth_service),
 ):
     """Self-service password change for any user. Requires the current password;
     does not require an active session, so it also works from the login screen."""
+    client_ip = http_request.client.host if http_request.client else None
+    enforce_auth_limit(client_ip, request.username, settings.auth_max_failures, settings.auth_failure_window_seconds)
     try:
         auth.change_own_password(request.username, request.current_password, request.new_password)
     except ValueError:
+        record_auth_failure(client_ip, request.username)
         raise HTTPException(status_code=401, detail="Incorrect username or current password")
+    record_auth_success(client_ip, request.username)
 
 
 @router.post("/bootstrap", response_model=UserResponse, status_code=201)
 def bootstrap_admin(
+    http_request: Request,
     request: AdminBootstrapRequest,
     auth: AuthService = Depends(get_auth_service),
 ):
@@ -62,7 +74,10 @@ def bootstrap_admin(
             status_code=403,
             detail="Admin bootstrap is disabled. Set ADMIN_BOOTSTRAP_TOKEN to enable it.",
         )
+    client_ip = http_request.client.host if http_request.client else None
+    enforce_auth_limit(client_ip, "bootstrap", settings.auth_max_failures, settings.auth_failure_window_seconds)
     if not hmac.compare_digest(request.bootstrap_token, expected_token):
+        record_auth_failure(client_ip, "bootstrap")
         raise HTTPException(status_code=401, detail="Invalid bootstrap token")
     try:
         user = auth.bootstrap_admin(request.username, request.password)
