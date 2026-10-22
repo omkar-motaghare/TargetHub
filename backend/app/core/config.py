@@ -1,6 +1,16 @@
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEV_ENVIRONMENTS = {"dev", "development", "test"}
+MIN_SECRET_KEY_LENGTH = 32
+PLACEHOLDER_SECRET_KEYS = {
+    "replace-me",
+    "please-change-this",
+    "changeme",
+    "targethub-dev-only-change-me",
+}
 
 
 class Settings(BaseSettings):
@@ -11,7 +21,7 @@ class Settings(BaseSettings):
 
     app_name: str = "TargetHub"
     app_version: str = "0.1.0"
-    environment: str = "development"
+    environment: str = "production"
 
     host: str = "0.0.0.0"
     port: int = 8000
@@ -36,6 +46,18 @@ class Settings(BaseSettings):
 
     # One-time first-admin bootstrap. Unset/empty disables bootstrap entirely.
     admin_bootstrap_token: str | None = None
+
+    @model_validator(mode="after")
+    def reject_weak_secret_key(self) -> "Settings":
+        if self.environment.lower() in DEV_ENVIRONMENTS:
+            return self
+        key = self.secret_key.strip()
+        if len(key) < MIN_SECRET_KEY_LENGTH or key.lower() in PLACEHOLDER_SECRET_KEYS:
+            raise ValueError(
+                f"SECRET_KEY must be a random value of at least {MIN_SECRET_KEY_LENGTH} "
+                "characters unless ENVIRONMENT=development"
+            )
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",

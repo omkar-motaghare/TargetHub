@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import sys
 
@@ -7,3 +8,5 @@ backend_path = str(BACKEND_ROOT)
 
 if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
+
+os.environ.setdefault("ENVIRONMENT", "development")
