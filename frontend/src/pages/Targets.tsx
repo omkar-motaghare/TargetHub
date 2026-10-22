@@ -1,81 +1,215 @@
-import React, {useEffect, useState} from 'react'
-import { listTargets, listReservations, createReservation } from '../services/api'
-import { useAuth } from '../services/auth'
+import React, { useEffect, useMemo, useState } from 'react'
 
-export default function Targets(){
-  const [targets, setTargets] = useState<any[]>([])
-  const [reservations, setReservations] = useState<any[]>([])
+import { createReservation, listReservations, listTargets, releaseReservation } from '../services/api'
+import { useAuth } from '../services/auth'
+import type { Reservation, Target } from '../services/types'
+import { classifyTargetStatus, errorMessage, prettyDate } from '../utils/ui'
+
+function findActiveReservation(targetId: string, reservations: Reservation[]): Reservation | undefined {
+  return reservations.find((item) => item.target_id === targetId && item.status === 'active')
+}
+
+export default function Targets() {
+  const auth = useAuth()
+  const [targets, setTargets] = useState<Target[]>([])
+  const [reservations, setReservations] = useState<Reservation[]>([])
+  const [loading, setLoading] = useState(true)
+  const [message, setMessage] = useState<string | null>(null)
   const [reservingTarget, setReservingTarget] = useState<string | null>(null)
   const [startsAt, setStartsAt] = useState<string>('')
   const [endsAt, setEndsAt] = useState<string>('')
-  const auth = useAuth()
+  const [actionBusy, setActionBusy] = useState(false)
 
-  useEffect(()=>{ refresh() },[])
-  async function refresh(){
-    const t = await listTargets()
-    const r = await listReservations()
-    setTargets(t); setReservations(r)
+  const stats = useMemo(() => {
+    const total = targets.length
+    const available = targets.filter(
+      (target) => classifyTargetStatus(target.enabled, !!findActiveReservation(target.id, reservations)) === 'available',
+    ).length
+    const reserved = targets.filter(
+      (target) => classifyTargetStatus(target.enabled, !!findActiveReservation(target.id, reservations)) === 'reserved',
+    ).length
+    return { total, available, reserved }
+  }, [targets, reservations])
+
+  useEffect(() => {
+    void refresh()
+  }, [])
+
+  async function refresh(): Promise<void> {
+    setLoading(true)
+    setMessage(null)
+    try {
+      const [targetRows, reservationRows] = await Promise.all([listTargets(), listReservations()])
+      setTargets(targetRows)
+      setReservations(reservationRows)
+    } catch (error) {
+      setMessage(errorMessage(error))
+    } finally {
+      setLoading(false)
+    }
   }
 
-  function reservedBy(targetId:string){
-    return reservations.find((r:any)=>r.target_id===targetId || r.targetId===targetId)
+  function openReserveModal(targetId: string): void {
+    setReservingTarget(targetId)
+    const now = new Date()
+    setStartsAt(new Date(now.getTime()).toISOString().slice(0, 16))
+    setEndsAt(new Date(now.getTime() + 30 * 60 * 1000).toISOString().slice(0, 16))
   }
 
-  async function handleReserve(id:string){
-    try{
-      if(!startsAt || !endsAt){ alert('Please choose start and end time'); return }
-      // convert local datetime-local to ISO with timezone
-      const starts = new Date(startsAt).toISOString()
-      const ends = new Date(endsAt).toISOString()
-      await createReservation(id, auth.user.username, starts, ends)
+  async function handleReserve(targetId: string): Promise<void> {
+    if (!auth.user) return
+    if (!startsAt || !endsAt) {
+      setMessage('Please select both reservation start and end timestamps.')
+      return
+    }
+
+    setActionBusy(true)
+    setMessage(null)
+    try {
+      await createReservation(targetId, auth.user.username, new Date(startsAt).toISOString(), new Date(endsAt).toISOString())
       setReservingTarget(null)
       await refresh()
-    }catch(err:any){ alert(err.message) }
+    } catch (error) {
+      setMessage(errorMessage(error))
+    } finally {
+      setActionBusy(false)
+    }
   }
-  async function handleRelease(id:string){
-    try{
-      // find reservation id for this target owned by user
-      const r = reservations.find((x:any)=>x.target_id===id && x.user_id===auth.user.username)
-      if(!r) throw new Error('No reservation found')
-      await fetch(`/api/v1/reservations/${r.id}/release?user_id=${encodeURIComponent(auth.user.username)}`, { method:'POST', headers: { Authorization: `Bearer ${localStorage.getItem('th_token')}` } })
+
+  async function handleRelease(targetId: string): Promise<void> {
+    if (!auth.user) return
+    const reservation = reservations.find(
+      (entry) => entry.target_id === targetId && entry.user_id === auth.user?.username && entry.status === 'active',
+    )
+    if (!reservation) {
+      setMessage('No active reservation was found for your user on this target.')
+      return
+    }
+    setActionBusy(true)
+    setMessage(null)
+    try {
+      await releaseReservation(reservation.id, auth.user.username)
       await refresh()
-    }catch(err:any){ alert(err.message) }
+    } catch (error) {
+      setMessage(errorMessage(error))
+    } finally {
+      setActionBusy(false)
+    }
   }
 
   return (
     <div>
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-        <h2>Targets</h2>
-        <button className="button" onClick={()=>refresh()}>Refresh</button>
+      <div className="page-head">
+        <div>
+          <h2 className="page-title">Targets</h2>
+          <p className="muted">Reserve shared hardware and inspect mapped capabilities.</p>
+        </div>
+        <button className="button" onClick={() => void refresh()} disabled={loading}>
+          {loading ? 'Loading...' : 'Refresh'}
+        </button>
       </div>
+
+      {message && <div className="feedback error">{message}</div>}
+
+      <div className="grid three" style={{ marginBottom: '0.9rem' }}>
+        <div className="card">
+          <div className="muted">Total targets</div>
+          <h3>{stats.total}</h3>
+        </div>
+        <div className="card">
+          <div className="muted">Available</div>
+          <h3>{stats.available}</h3>
+        </div>
+        <div className="card">
+          <div className="muted">Reserved</div>
+          <h3>{stats.reserved}</h3>
+        </div>
+      </div>
+
       <div className="list">
-        {targets.map(t=>{
-          const r = reservedBy(t.id)
-          const status = !t.enabled ? 'disabled' : r ? 'reserved' : 'available'
+        {!loading && targets.length === 0 && <div className="card">No targets found.</div>}
+        {targets.map((target) => {
+          const activeReservation = findActiveReservation(target.id, reservations)
+          const status = classifyTargetStatus(target.enabled, !!activeReservation)
+          const isMine = activeReservation?.user_id === auth.user?.username
           return (
-            <div key={t.id} className="list-item">
-              <div>
-                <div style={{fontWeight:600}}>{t.name}</div>
-                <div style={{fontSize:12,color:'#6b7280'}}>{t.tags?.join(', ')}</div>
+            <article key={target.id} className="list-item stacked">
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.8rem' }}>
+                <div>
+                  <div style={{ fontWeight: 800 }}>{target.name}</div>
+                  <div className="muted">
+                    {target.vendor || '-'} / {target.board_model || '-'} / {target.location || '-'}
+                  </div>
+                </div>
+                <span className={`badge ${status}`}>{status}</span>
               </div>
-              <div style={{display:'flex',gap:8,alignItems:'center'}}>
-                <div className={`badge ${status}`}>{status}</div>
-                {t.enabled && !r && <button className="button" onClick={()=>{ setReservingTarget(t.id); const now = new Date(); setStartsAt(new Date(now.getTime()).toISOString().slice(0,16)); setEndsAt(new Date(now.getTime()+30*60*1000).toISOString().slice(0,16)) }}>Reserve</button>}
-                {r && (r.user_id===auth.user.username || r.user===auth.user.username) && <button className="button secondary" onClick={()=>handleRelease(t.id)}>Release</button>}
-                {r && !(r.user_id===auth.user.username || r.user===auth.user.username) && <div style={{fontSize:12}}>Reserved by {r.user_id || r.user}</div>}
+
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {(target.capabilities || []).map((capability) => (
+                  <span key={capability.id} className="inline-note">
+                    {capability.name} ({capability.capability_type})
+                  </span>
+                ))}
               </div>
-            </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+                <div className="muted">
+                  {activeReservation
+                    ? `Reserved by ${activeReservation.user_id} until ${prettyDate(activeReservation.ends_at)}`
+                    : 'No active reservation'}
+                </div>
+                <div style={{ display: 'flex', gap: '0.55rem' }}>
+                  {!activeReservation && target.enabled && (
+                    <button className="button" onClick={() => openReserveModal(target.id)} disabled={actionBusy}>
+                      Reserve
+                    </button>
+                  )}
+                  {isMine && (
+                    <button
+                      className="button secondary"
+                      onClick={() => void handleRelease(target.id)}
+                      disabled={actionBusy}
+                    >
+                      Release
+                    </button>
+                  )}
+                </div>
+              </div>
+            </article>
           )
         })}
       </div>
+
       {reservingTarget && (
-        <div className="card" style={{marginTop:12}}>
-          <h3>Reserve target</h3>
-          <div style={{display:'flex',gap:8,alignItems:'center'}}>
-            <input className="input" type="datetime-local" value={startsAt} onChange={e=>setStartsAt(e.target.value)} />
-            <input className="input" type="datetime-local" value={endsAt} onChange={e=>setEndsAt(e.target.value)} />
-            <button className="button" onClick={()=>handleReserve(reservingTarget)}>Confirm</button>
-            <button className="button secondary" onClick={()=>setReservingTarget(null)}>Cancel</button>
+        <div className="card" style={{ marginTop: '0.9rem' }}>
+          <h3>Create reservation window</h3>
+          <div className="grid two">
+            <label>
+              <span className="muted">Starts</span>
+              <input
+                className="input"
+                type="datetime-local"
+                value={startsAt}
+                onChange={(event) => setStartsAt(event.target.value)}
+              />
+            </label>
+            <label>
+              <span className="muted">Ends</span>
+              <input
+                className="input"
+                type="datetime-local"
+                value={endsAt}
+                onChange={(event) => setEndsAt(event.target.value)}
+              />
+            </label>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.8rem' }}>
+            <button className="button" onClick={() => void handleReserve(reservingTarget)} disabled={actionBusy}>
+              Confirm
+            </button>
+            <button className="button secondary" onClick={() => setReservingTarget(null)} disabled={actionBusy}>
+              Cancel
+            </button>
           </div>
         </div>
       )}

@@ -1,39 +1,112 @@
-import React, { createContext, useContext, useState } from 'react'
-import * as api from './api'
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 
-type User = { username: string; role: 'admin' | 'user' }
+import {
+  clearAuthToken,
+  getAuthToken,
+  login as apiLogin,
+  me,
+  setAuthToken,
+  setUnauthorizedHandler,
+} from './api'
+import type { UserProfile, UserRole } from './types'
 
-const AuthContext = createContext<any>(null)
+export type AuthUser = {
+  username: string
+  role: UserRole
+  roles: string[]
+}
 
-export function AuthProvider({ children }: { children: React.ReactNode }){
-  const [user, setUser] = useState<User | null>(()=>{
-    const raw = localStorage.getItem('th_user')
-    return raw ? JSON.parse(raw) : null
-  })
+type AuthContextValue = {
+  user: AuthUser | null
+  restoring: boolean
+  login: (username: string, password: string) => Promise<void>
+  logout: () => void
+  isAdmin: boolean
+}
 
-  const login = async (username: string, password: string) =>{
-    const token = await api.login(username, password)
-    localStorage.setItem('th_token', token)
-    // fetch /auth/me to get roles and canonical username
-    const me = await api.me()
-    const role = (me.roles || []).includes('admin') ? 'admin' : 'user'
-    const u:User = { username: me.username || username, role }
-    setUser(u)
-    localStorage.setItem('th_user', JSON.stringify(u))
+const AuthContext = createContext<AuthContextValue | null>(null)
+
+function profileToAuthUser(profile: UserProfile): AuthUser {
+  const roles = profile.roles || []
+  return {
+    username: profile.username,
+    role: roles.includes('admin') ? 'admin' : 'user',
+    roles,
+  }
+}
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<AuthUser | null>(null)
+  const [restoring, setRestoring] = useState<boolean>(true)
+
+  const logout = () => {
+    setUser(null)
+    localStorage.removeItem('th_user')
+    clearAuthToken()
   }
 
-  // If we already have a token, try to fetch the current user on mount
-  React.useEffect(()=>{
-    (async()=>{
-      const token = localStorage.getItem('th_token')
-      if(token && !user){
-        try{ const me = await api.me(); const role = (me.roles||[]).includes('admin') ? 'admin' : 'user'; const u:User = { username: me.username, role }; setUser(u); localStorage.setItem('th_user', JSON.stringify(u)) }catch{ /* ignore */ }
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      logout()
+    })
+    return () => setUnauthorizedHandler(null)
+  }, [])
+
+  useEffect(() => {
+    const raw = localStorage.getItem('th_user')
+    if (raw) {
+      try {
+        setUser(JSON.parse(raw) as AuthUser)
+      } catch {
+        localStorage.removeItem('th_user')
+      }
+    }
+
+    const token = getAuthToken()
+    if (!token) {
+      setRestoring(false)
+      return
+    }
+
+    ;(async () => {
+      try {
+        const profile = await me()
+        const authUser = profileToAuthUser(profile)
+        setUser(authUser)
+        localStorage.setItem('th_user', JSON.stringify(authUser))
+      } catch {
+        logout()
+      } finally {
+        setRestoring(false)
       }
     })()
   }, [])
 
-  const logout = ()=>{ setUser(null); localStorage.removeItem('th_user'); localStorage.removeItem('th_token') }
-  return <AuthContext.Provider value={{ user, login, logout }}>{children}</AuthContext.Provider>
+  const login = async (username: string, password: string) => {
+    const token = await apiLogin(username, password)
+    setAuthToken(token)
+    const profile = await me()
+    const authUser = profileToAuthUser(profile)
+    setUser(authUser)
+    localStorage.setItem('th_user', JSON.stringify(authUser))
+  }
+
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      user,
+      restoring,
+      login,
+      logout,
+      isAdmin: user?.role === 'admin',
+    }),
+    [user, restoring],
+  )
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
-export function useAuth(){ return useContext(AuthContext) }
+export function useAuth(): AuthContextValue {
+  const context = useContext(AuthContext)
+  if (!context) throw new Error('useAuth must be used within AuthProvider')
+  return context
+}
