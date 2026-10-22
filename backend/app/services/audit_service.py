@@ -44,7 +44,11 @@ class AuditService:
         except Exception as exc:  # pragma: no cover - defensive best-effort audit
             logger.warning(f"Failed to record audit event '{action}': {exc}")
 
-    def list(self, user_id=None, target_id=None, session_id=None, limit=200):
+    def list(self, user_id=None, target_id=None, session_id=None, action=None, limit=200):
         return self.repository.list(
-            user_id=user_id, target_id=target_id, session_id=session_id, limit=limit
+            user_id=user_id,
+            target_id=target_id,
+            session_id=session_id,
+            action=action,
+            limit=limit,
         )

@@ -466,12 +466,14 @@ export async function listAuditEntries(params: {
   user_id?: string
   target_id?: string
   session_id?: string
+  action?: string
   limit?: number
 } = {}): Promise<AuditEntry[]> {
   const normalized: Record<string, string | undefined> = {
     user_id: params.user_id,
     target_id: params.target_id,
     session_id: params.session_id,
+    action: params.action,
     limit: params.limit ? String(params.limit) : undefined,
   }
   return request<AuditEntry[]>(withQuery('/audit', normalized), { method: 'GET' }, 'Failed to list audit entries')

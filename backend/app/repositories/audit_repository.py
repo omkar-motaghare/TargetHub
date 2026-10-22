@@ -21,6 +21,7 @@ class AuditRepository:
         user_id: str | None = None,
         target_id: str | None = None,
         session_id: str | None = None,
+        action: str | None = None,
         limit: int = 200,
     ) -> list[AuditLog]:
         statement = select(AuditLog).order_by(AuditLog.created_at.desc())
@@ -30,5 +31,7 @@ class AuditRepository:
             statement = statement.where(AuditLog.target_id == target_id)
         if session_id:
             statement = statement.where(AuditLog.session_id == session_id)
+        if action:
+            statement = statement.where(AuditLog.action == action)
         statement = statement.limit(limit)
         return list(self.db.scalars(statement).all())

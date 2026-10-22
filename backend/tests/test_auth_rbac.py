@@ -659,3 +659,59 @@ def test_enrollment_install_command_verifies_checksums(client, admin_token):
     assert "| sudo bash" not in command
     assert "sha256sum -c" in command
     assert "--agent-sha256" in command
+
+
+# --- Observability ---------------------------------------------------------------
+
+
+def test_request_id_is_echoed_when_safe_and_replaced_otherwise(client):
+    echoed = client.get("/health", headers={"X-Request-ID": "trace-abc12345"})
+    assert echoed.headers["X-Request-ID"] == "trace-abc12345"
+
+    replaced = client.get("/health", headers={"X-Request-ID": "bad id\twith spaces"})
+    assert replaced.headers["X-Request-ID"] != "bad id\twith spaces"
+    assert len(replaced.headers["X-Request-ID"]) == 36
+
+
+def test_log_lines_carry_the_request_id(client):
+    from app.core.logging import logger
+
+    records = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="INFO")
+    try:
+        client.get("/health", headers={"X-Request-ID": "trace-log-12345"})
+    finally:
+        logger.remove(sink_id)
+
+    request_lines = [r for r in records if r["extra"].get("request_id") == "trace-log-12345"]
+    assert any(r["message"].startswith("-->") for r in request_lines)
+    assert any(r["message"].startswith("<--") for r in request_lines)
+
+
+def test_metrics_count_requests(client):
+    client.get("/health")
+    body = client.get("/metrics").text
+    assert 'targethub_http_requests_total{method="GET",status="200"}' in body
+
+
+def test_audit_filters_by_user_target_session_and_action(client, admin_token):
+    from app.repositories.audit_repository import AuditRepository
+    from app.services.audit_service import AuditService
+
+    with client.session_factory() as db:
+        audit = AuditService(AuditRepository(db))
+        audit.record(action="session.open", user_id="alice", target_id="t1", session_id="s1")
+        audit.record(action="session.close", user_id="alice", target_id="t1", session_id="s1")
+        audit.record(action="session.open", user_id="bob", target_id="t2", session_id="s2")
+
+    def fetch(**params):
+        response = client.get("/api/v1/audit", params=params, headers=auth_headers(admin_token))
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    assert len(fetch(user_id="alice")) == 2
+    assert len(fetch(target_id="t2")) == 1
+    assert len(fetch(session_id="s1")) == 2
+    assert len(fetch(action="session.open")) == 2
+    assert len(fetch(action="session.close")) == 1
+    assert fetch(user_id="alice", action="session.close")[0]["target_id"] == "t1"

@@ -10,6 +10,7 @@ export default function AdminActivity() {
   const [limit, setLimit] = useState(100)
   const [userId, setUserId] = useState('')
   const [targetId, setTargetId] = useState('')
+  const [action, setAction] = useState('')
   const [message, setMessage] = useState<string | null>(null)
 
   useEffect(() => {
@@ -24,6 +25,7 @@ export default function AdminActivity() {
         limit,
         user_id: userId.trim() || undefined,
         target_id: targetId.trim() || undefined,
+        action: action.trim() || undefined,
       })
       setEntries(rows)
     } catch (error) {
@@ -52,6 +54,15 @@ export default function AdminActivity() {
           <label>
             <span className="muted">Target ID</span>
             <input className="input" value={targetId} onChange={(event) => setTargetId(event.target.value)} />
+          </label>
+          <label>
+            <span className="muted">Action</span>
+            <input
+              className="input"
+              placeholder="session.open"
+              value={action}
+              onChange={(event) => setAction(event.target.value)}
+            />
           </label>
           <label>
             <span className="muted">Limit</span>

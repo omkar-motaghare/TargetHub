@@ -25,8 +25,13 @@ def list_audit(
     user_id: str | None = Query(default=None),
     target_id: str | None = Query(default=None),
     session_id: str | None = Query(default=None),
+    action: str | None = Query(default=None, max_length=64),
     limit: int = Query(default=200, ge=1, le=1000),
 ):
     return service.list(
-        user_id=user_id, target_id=target_id, session_id=session_id, limit=limit
+        user_id=user_id,
+        target_id=target_id,
+        session_id=session_id,
+        action=action,
+        limit=limit,
     )
