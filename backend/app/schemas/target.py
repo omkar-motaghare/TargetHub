@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.target_capability import (
     TargetCapabilityCreate,
+    TargetCapabilityPublicResponse,
     TargetCapabilityResponse,
 )
 
@@ -39,6 +40,15 @@ class TargetUpdate(BaseModel):
 class TargetResponse(TargetBase):
     id: str
     capabilities: list[TargetCapabilityResponse] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TargetPublicResponse(TargetBase):
+    id: str
+    capabilities: list[TargetCapabilityPublicResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

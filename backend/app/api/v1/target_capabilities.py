@@ -3,12 +3,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_current_user, get_db, require_role
+from app.api.dependencies import get_current_user, get_db, is_admin_user, require_role
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.target_capability_repository import TargetCapabilityRepository
 from app.repositories.target_repository import TargetRepository
 from app.schemas.target_capability import (
     TargetCapabilityCreate,
+    TargetCapabilityPublicResponse,
     TargetCapabilityResponse,
     TargetCapabilityUpdate,
 )
@@ -31,19 +32,31 @@ def get_service(db: Annotated[Session, Depends(get_db)]) -> TargetCapabilityServ
 Service = Annotated[TargetCapabilityService, Depends(get_service)]
 
 
-@router.get("", response_model=list[TargetCapabilityResponse])
-def list_capabilities(target_id: str, service: Service, _user=Depends(get_current_user)):
-    return service.list_capabilities(target_id)
+def present(capability, user) -> TargetCapabilityResponse | TargetCapabilityPublicResponse:
+    if is_admin_user(user):
+        return TargetCapabilityResponse.model_validate(capability)
+    return TargetCapabilityPublicResponse.model_validate(capability)
 
 
-@router.get("/{capability_id}", response_model=TargetCapabilityResponse)
+@router.get(
+    "",
+    response_model=list[TargetCapabilityResponse | TargetCapabilityPublicResponse],
+)
+def list_capabilities(target_id: str, service: Service, user=Depends(get_current_user)):
+    return [present(item, user) for item in service.list_capabilities(target_id)]
+
+
+@router.get(
+    "/{capability_id}",
+    response_model=TargetCapabilityResponse | TargetCapabilityPublicResponse,
+)
 def get_capability(
     target_id: str,
     capability_id: str,
     service: Service,
-    _user=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
-    return service.get_capability(target_id, capability_id)
+    return present(service.get_capability(target_id, capability_id), user)
 
 
 @router.post("", response_model=TargetCapabilityResponse, status_code=201)

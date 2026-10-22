@@ -47,3 +47,17 @@ class TargetCapabilityResponse(TargetCapabilityBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TargetCapabilityPublicResponse(BaseModel):
+    """Capability view for non-admin users; hides provider and agent internals."""
+
+    id: str
+    target_id: str
+    name: str
+    capability_type: CapabilityType
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

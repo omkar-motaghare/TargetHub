@@ -589,3 +589,49 @@ def test_audit_requires_admin(client, admin_token):
 
     assert client.get("/api/v1/audit", headers=auth_headers(jack_token)).status_code == 403
     assert client.get("/api/v1/audit", headers=auth_headers(admin_token)).status_code == 200
+
+
+# --- Response redaction for non-admins ----------------------------------------
+
+SENSITIVE_FIELDS = {"provider_config", "agent_id", "resource_id", "provider_key"}
+
+
+def test_non_admin_target_and_capability_responses_hide_internals(client, admin_token):
+    created = client.post(
+        "/api/v1/targets",
+        json={
+            "name": "BOARD-R",
+            "capabilities": [
+                {
+                    "name": "Serial",
+                    "capability_type": "serial",
+                    "provider_key": "serial.lab",
+                    "provider_config": {"secret": "hunter2", "port": "/dev/ttyUSB0"},
+                }
+            ],
+        },
+        headers=auth_headers(admin_token),
+    )
+    assert created.status_code == 201, created.text
+    target_id = created.json()["id"]
+    create_user(client, admin_token, "rita")
+    rita = auth_headers(login(client, "rita"))
+    admin = auth_headers(admin_token)
+
+    for path in (
+        f"/api/v1/targets/{target_id}",
+        f"/api/v1/targets/{target_id}/capabilities",
+    ):
+        body = client.get(path, headers=rita).text
+        assert "hunter2" not in body and "/dev/ttyUSB0" not in body
+        assert not any(f'"{field}"' in body for field in SENSITIVE_FIELDS)
+
+    listed = client.get("/api/v1/targets", headers=rita).json()
+    assert listed[0]["capabilities"][0]["capability_type"] == "serial"
+    assert not any(f in listed[0]["capabilities"][0] for f in SENSITIVE_FIELDS)
+
+    admin_capability = client.get(f"/api/v1/targets/{target_id}/capabilities", headers=admin).json()[0]
+    assert admin_capability["provider_config"] == {"secret": "hunter2", "port": "/dev/ttyUSB0"}
+    assert admin_capability["provider_key"] == "serial.lab"
+    admin_target = client.get(f"/api/v1/targets/{target_id}", headers=admin).json()
+    assert admin_target["capabilities"][0]["provider_config"] == {"secret": "hunter2", "port": "/dev/ttyUSB0"}
