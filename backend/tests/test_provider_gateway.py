@@ -103,7 +103,7 @@ class FakeAgentOperationService:
     def __init__(self):
         self.calls = []
 
-    def execute_serial(self, *, session, user_id, operation, params):
+    def execute_for_session(self, *, session, user_id, operation, params):
         self.calls.append((session.id, user_id, operation, params))
         if operation == "open":
             return {"message": "Serial connection opened", "data": {}}

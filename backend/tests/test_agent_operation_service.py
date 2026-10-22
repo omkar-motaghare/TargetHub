@@ -56,6 +56,9 @@ class FakeOperationRepository:
         self.items[entry.id] = entry
         return entry
 
+    def expire_stale(self, *, agent_id, now, pending_before):
+        return 0
+
     def claim_next(self, *, agent_id, now, lease_expires_at, allowed_operations):
         candidates = sorted(self.items.values(), key=lambda item: item.requested_at or now)
         for item in candidates:
@@ -240,3 +243,34 @@ def test_complete_for_agent_rejects_foreign_agent():
             message="ok",
             data={},
         )
+
+
+def test_power_session_queues_power_operation_for_agent():
+    session = FakeSession(id="s1", capability_type="reset", agent_id="a1", resource_id="r1")
+    resource = FakeResource(id="r1", agent_id="a1", resource_key="power:relay1", resource_type="power")
+    service, operation_repo = _service(session, resource, auto_complete=True)
+
+    service.execute_for_session(session=session, user_id="user1", operation="cycle", params={})
+
+    stored = next(iter(operation_repo.items.values()))
+    assert (stored.operation, stored.resource_type) == ("cycle", "power")
+    with pytest.raises(ConflictResource, match="not supported"):
+        service.execute_for_session(session=session, user_id="user1", operation="read", params={})
+
+
+def test_deploy_requires_url_and_sha256():
+    session = FakeSession(id="s1", capability_type="deploy", agent_id="a1", resource_id="r1")
+    resource = FakeResource(id="r1", agent_id="a1", resource_key="deploy:flash", resource_type="deploy")
+    service, operation_repo = _service(session, resource, auto_complete=True)
+
+    for params in ({}, {"url": "ftp://x/fw", "sha256": "a" * 64}, {"url": "https://x/fw", "sha256": "xyz"}):
+        with pytest.raises(ConflictResource):
+            service.execute_for_session(session=session, user_id="user1", operation="deploy", params=params)
+
+    service.execute_for_session(
+        session=session,
+        user_id="user1",
+        operation="deploy",
+        params={"url": "https://x/fw", "sha256": "A" * 64},
+    )
+    assert next(iter(operation_repo.items.values())).params["sha256"] == "a" * 64

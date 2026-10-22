@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models.agent_operation import AgentOperation
@@ -66,3 +66,31 @@ class AgentOperationRepository:
         self.db.commit()
         self.db.refresh(operation)
         return operation
+
+    def expire_stale(self, *, agent_id: str, now: datetime, pending_before: datetime) -> int:
+        """Time out operations whose lease lapsed or that nobody claimed in time."""
+        result = self.db.execute(
+            update(AgentOperation)
+            .where(
+                AgentOperation.agent_id == agent_id,
+                or_(
+                    and_(
+                        AgentOperation.status == "in_progress",
+                        AgentOperation.lease_expires_at.is_not(None),
+                        AgentOperation.lease_expires_at <= now,
+                    ),
+                    and_(
+                        AgentOperation.status == "pending",
+                        AgentOperation.requested_at <= pending_before,
+                    ),
+                ),
+            )
+            .values(
+                status="timed_out",
+                detail="Operation expired before the Agent completed it",
+                completed_at=now,
+                lease_expires_at=None,
+            )
+        )
+        self.db.commit()
+        return result.rowcount

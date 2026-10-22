@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import os
 import secrets
 from datetime import UTC, datetime, timedelta
 
@@ -9,7 +10,7 @@ from app.models.agent import Agent, AgentEnrollment, AgentResource
 from app.repositories.agent_repository import AgentRepository
 
 ENROLLMENT_TTL_MINUTES = 30
-AGENT_OFFLINE_AFTER_SECONDS = 45
+AGENT_OFFLINE_AFTER_SECONDS = int(os.getenv("TARGETHUB_AGENT_OFFLINE_AFTER_SECONDS", "45"))
 
 
 class AgentService:

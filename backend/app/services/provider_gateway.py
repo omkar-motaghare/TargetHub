@@ -43,12 +43,14 @@ class ProviderGateway:
         self.agent_operation_service = agent_operation_service
 
     @staticmethod
-    def _uses_agent_serial_transport(session) -> bool:
-        return (
-            session.capability_type == "serial"
-            and bool(session.agent_id)
-            and bool(session.resource_id)
-        )
+    def _uses_agent_transport(session) -> bool:
+        """Serial always runs on the Agent; power/deploy opt in with provider_config transport=agent."""
+        if not AgentOperationService.uses_agent_transport(session):
+            return False
+        if session.capability_type == "serial":
+            return True
+        provider_config = getattr(session, "_provider_config", None) or {}
+        return provider_config.get("transport") == "agent"
 
     def _validate_runtime_binding(self, session):
         if self.target_repository is None:
@@ -124,8 +126,8 @@ class ProviderGateway:
 
     def operations_for(self, session_id: str, user_id: str) -> dict[str, Any]:
         session = self._get_active_session(session_id, user_id)
-        if self._uses_agent_serial_transport(session):
-            operations = AgentOperationService.serial_operations()
+        if self._uses_agent_transport(session):
+            operations = AgentOperationService.operations_for_family(session.capability_type)
         else:
             provider = self._get_provider(session)
             operations = provider.operations()
@@ -141,14 +143,14 @@ class ProviderGateway:
     ) -> dict[str, Any]:
         session = self._get_active_session(session_id, user_id)
         try:
-            if self._uses_agent_serial_transport(session):
-                if operation not in AgentOperationService.serial_operations():
+            if self._uses_agent_transport(session):
+                if operation not in AgentOperationService.operations_for_family(session.capability_type):
                     raise ConflictResource(
                         f"Operation '{operation}' is not supported by capability '{session.capability_type}'"
                     )
                 if self.agent_operation_service is None:
-                    raise ConflictResource("Agent serial transport is not configured")
-                remote_result = self.agent_operation_service.execute_serial(
+                    raise ConflictResource("Agent transport is not configured")
+                remote_result = self.agent_operation_service.execute_for_session(
                     session=session,
                     user_id=user_id,
                     operation=operation,
