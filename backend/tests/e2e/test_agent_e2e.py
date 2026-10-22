@@ -340,6 +340,24 @@ def test_full_lab_flow(lab: Lab):
     assert execute(power_id, "off").status_code == 200
     assert lab.gpio_value.read_text() == "1"
 
+    # --- the Python SDK and CLI drive the same hub
+    sys.path.insert(0, str(BACKEND.parent / "sdk" / "python"))
+    from targethub_sdk import TargetHubClient
+
+    with TargetHubClient(lab.base, alice) as sdk:
+        assert sdk.me()["username"] == "alice"
+        assert {"on", "off", "status"} <= set(sdk.operations(power_id))
+        assert sdk.power(power_id, "on")["data"]["state"] == "on"
+    assert lab.gpio_value.read_text() == "0"
+    cli_run = subprocess.run(
+        [sys.executable, "-m", "targethub_sdk.cli", "--url", lab.base, "power", power_id, "off"],
+        env={**os.environ, "TARGETHUB_TOKEN": alice, "PYTHONPATH": str(BACKEND.parent / "sdk" / "python")},
+        capture_output=True, text=True, timeout=60,
+    )
+    assert cli_run.returncode == 0, cli_run.stderr
+    assert json.loads(cli_run.stdout)["data"]["state"] == "off"
+    assert lab.gpio_value.read_text() == "1"
+
     # --- deploy: checksum enforced end to end
     deploy = open_session("deploy")
     assert deploy.status_code == 201, deploy.text

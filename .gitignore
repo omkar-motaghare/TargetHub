@@ -54,3 +54,6 @@ out/
 backend/app/web/react/
 frontend/test-results/
 frontend/playwright-report/
+dist/
+*.egg-info/
+build/
