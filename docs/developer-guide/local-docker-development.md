@@ -74,7 +74,7 @@ docker compose ps
 View logs:
 
 ```bash
-docker compose logs -f targethub
+docker compose logs -f api
 ```
 
 ## 5. Verify the application
@@ -107,12 +107,12 @@ Expected response is similar to:
 }
 ```
 
-Create an admin user:
+Create the first admin user (bootstrap is one-time):
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/auth/users \
+curl -X POST http://localhost:8000/api/v1/auth/bootstrap \
     -H "Content-Type: application/json" \
-    -d '{"username":"admin","password":"admin1234","roles":["admin"]}'
+    -d '{"username":"admin","password":"admin1234","bootstrap_token":"<ADMIN_BOOTSTRAP_TOKEN>"}'
 ```
 
 Get an access token:
@@ -142,7 +142,8 @@ curl http://localhost:8000/api/v1/reservations -H "Authorization: Bearer $TOKEN"
 docker compose down
 ```
 
-The database remains in the named Docker volume `targethub_data`.
+The database and runtime state remain in named Docker volumes:
+`targethub_postgres_data`, `targethub_redis_data`, and `targethub_minio_data`.
 
 To remove the application container **and** the local database volume:
 
@@ -181,7 +182,8 @@ alembic upgrade heads
 uvicorn app.main:app
 ```
 
-The SQLite database is stored in the Docker volume at `/data/targethub.db`.
+The canonical Docker runtime uses PostgreSQL persisted in Docker volume
+`targethub_postgres_data`.
 
 Do not manually run Alembic from a host Python virtual environment for the normal Docker workflow.
 
@@ -210,12 +212,12 @@ Commit to develop
 
 ## 10. Troubleshooting
 
-### Container exits immediately
+### API container exits immediately
 
 Inspect logs:
 
 ```bash
-docker compose logs targethub
+docker compose logs api
 ```
 
 ### Port 8000 is already in use

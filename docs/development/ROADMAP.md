@@ -13,6 +13,9 @@ M0 — Repository hygiene (priority: high)
   - Merge any unique, useful files from root `app/` into `backend/app/`.
   - Remove or archive the redundant root `app/` tree.
   - Update `backend/Dockerfile` and `docker-compose.yml` to reference `backend/app/` consistently.
+- Status: **Complete (2026-09-22)**
+- Result: The root `app/` tree was audited and contained no files or active runtime references. It was preserved as `archive/app-root-legacy/`. `backend/app/` remains the canonical runtime tree.
+- Docker already builds from `./backend`, and the API/worker entrypoints already import the canonical `app` package from that build context. No runtime configuration change was necessary.
 - Acceptance: Single canonical `backend/app/` used by Docker build; no functional regressions in API routes.
 
 M1 — Authentication & RBAC
@@ -41,9 +44,10 @@ M5 — Hardening, CI/CD, release
 - Acceptance: CI passing; reproducible Docker image build and published artifact pipeline.
 
 Next steps (immediate)
-- Commit this roadmap to `develop`.
-- Begin M0: produce a file-level diff of `app/` vs `backend/app/`, propose a minimal merge/delete plan, and update Docker references.
+- Begin M1/M2 revalidation after the backend dependency environment is available.
+- Establish reproducible local test setup before relying on backend test results; the Phase 0 audit found SQLAlchemy missing from the current environment.
 
 Notes
 - Keep changes minimal and focused per milestone.
-- After M0 is complete, I'll provide concrete test commands for local verification (docker compose up, sample API calls).
+- M0 was completed as an archival change because no unique root application files needed migration.
+- Before treating M1 or M2 as complete, run the backend tests in a clean environment and verify the API routes manually.

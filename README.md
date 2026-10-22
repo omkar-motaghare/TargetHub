@@ -6,30 +6,46 @@
 
 TargetHub is an open-source **Embedded Lab Orchestration Platform** that enables engineering teams to efficiently manage shared embedded hardware through a unified interface. It provides target reservation, exclusive hardware access, power control, serial console, firmware deployment, debugger integration, and lab automation—eliminating resource conflicts while improving developer productivity.
 
-> 🚧 **Project Status:** Working Prototype (Core platform + authenticated dashboard workflow)
+> 🚧 **Project Status:** Working Prototype (Core platform + authenticated workflow, React frontend migration in progress)
 
 ---
 
 # Current Prototype Run Path
 
-TargetHub currently has one **recommended** local workflow.
+TargetHub now uses a React-first frontend direction.
 
 1. Start the backend stack with Docker Compose.
-2. Use the built-in dashboard served by the backend.
+2. Use the backend-served React frontend as the canonical UI path.
 
 ```bash
 docker compose up -d --build
 ```
 
+Data persistence notes:
+
+- Canonical stack uses PostgreSQL, Redis, and MinIO via `docker-compose.yml`.
+- Persistent data is stored in named volumes:
+  `targethub_postgres_data`, `targethub_redis_data`, and `targethub_minio_data`.
+- Restarting or recreating containers keeps data.
+- Running `docker compose down -v` deletes volumes and will reset data.
+
 Then open:
 
-- Dashboard: http://localhost:8000/dashboard
-- API docs: http://localhost:8000/docs
+- Canonical frontend (React): http://localhost:8000/app
+- Dashboard alias (React): http://localhost:8000/dashboard
+- Legacy fallback dashboard: http://localhost:8000/legacy-dashboard
+- Backend API docs: http://localhost:8000/docs
+
+Frontend/API smoke verification:
+
+```bash
+TARGETHUB_ADMIN_USER=admin TARGETHUB_ADMIN_PASS=change-me-now ./scripts/frontend_smoke_api.sh
+```
 
 Important notes:
 
-- The backend-served dashboard under `backend/app/web/` is the canonical prototype UI.
-- The separate React app under `frontend/` is currently experimental and not the primary developer path.
+- The React app under frontend/ is the canonical UI path.
+- The backend-served dashboard under backend/app/web/ remains a temporary migration fallback and reference implementation only.
 
 ---
 
