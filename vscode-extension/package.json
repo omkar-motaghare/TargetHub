@@ -1,0 +1,42 @@
+{
+  "name": "targethub-vscode",
+  "displayName": "TargetHub",
+  "description": "Reserve lab targets, control power and open serial consoles from VS Code",
+  "version": "0.1.0",
+  "publisher": "targethub",
+  "license": "Apache-2.0",
+  "private": true,
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "targethub.login", "title": "TargetHub: Sign In" },
+      { "command": "targethub.reserve", "title": "TargetHub: Reserve Target" },
+      { "command": "targethub.power", "title": "TargetHub: Power Control" },
+      { "command": "targethub.serial", "title": "TargetHub: Open Serial Console" },
+      { "command": "targethub.release", "title": "TargetHub: Release Reservation" }
+    ],
+    "configuration": {
+      "title": "TargetHub",
+      "properties": {
+        "targethub.url": {
+          "type": "string",
+          "default": "http://127.0.0.1:8000",
+          "description": "Base URL of the TargetHub server (use https:// in production)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.5",
+    "vitest": "^2.1.9"
+  }
+}
