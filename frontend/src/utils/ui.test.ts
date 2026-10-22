@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { ApiError, formatApiErrorDetail } from '../services/api'
-import { classifyTargetStatus, errorMessage } from './ui'
+import { classifyTargetStatus, errorMessage, toLocalInputValue } from './ui'
 
 describe('classifyTargetStatus', () => {
   it('returns disabled when target is disabled', () => {
@@ -39,5 +39,12 @@ describe('errorMessage', () => {
     ]
 
     expect(formatApiErrorDetail(detail)).toBe('username: Field required; password: Field required')
+  })
+})
+
+describe('toLocalInputValue', () => {
+  it('formats the local wall-clock time for datetime-local inputs', () => {
+    const date = new Date(2030, 0, 2, 3, 4)
+    expect(toLocalInputValue(date)).toBe('2030-01-02T03:04')
   })
 })

@@ -4,6 +4,7 @@ import { Link, NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import ChangePassword from './pages/ChangePassword'
 import Login from './pages/Login'
 import MyReservations from './pages/MyReservations'
+import SessionWorkspace from './pages/SessionWorkspace'
 import Sessions from './pages/Sessions'
 import AdminDashboard from './pages/Admin/Dashboard'
 import Targets from './pages/Targets'
@@ -110,6 +111,14 @@ function AppFrame() {
             element={
               <RequireAuth>
                 <Sessions />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/sessions/:sessionId"
+            element={
+              <RequireAuth>
+                <SessionWorkspace />
               </RequireAuth>
             }
           />

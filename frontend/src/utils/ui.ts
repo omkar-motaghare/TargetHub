@@ -25,3 +25,9 @@ export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   return 'Unexpected error'
 }
+
+// datetime-local inputs expect local wall-clock time, not UTC.
+export function toLocalInputValue(date: Date): string {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 16)
+}

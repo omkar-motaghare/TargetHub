@@ -373,6 +373,10 @@ export async function createSession(
   )
 }
 
+export async function getSession(sessionId: string): Promise<Session> {
+  return request<Session>(`/sessions/${sessionId}`, { method: 'GET' }, 'Failed to load session')
+}
+
 export async function closeSession(sessionId: string, userId: string): Promise<Session> {
   return request<Session>(
     `/sessions/${sessionId}/close?user_id=${encodeURIComponent(userId)}`,

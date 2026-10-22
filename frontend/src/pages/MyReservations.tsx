@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 
 import { createSession, listReservations, listSessions, listTargets, releaseReservation } from '../services/api'
 import { useAuth } from '../services/auth'
@@ -7,6 +8,7 @@ import { errorMessage, prettyDate } from '../utils/ui'
 
 export default function MyReservations() {
   const auth = useAuth()
+  const navigate = useNavigate()
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [targets, setTargets] = useState<Target[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
@@ -61,8 +63,8 @@ export default function MyReservations() {
     setBusy(true)
     setMessage(null)
     try {
-      await createSession(reservation.id, auth.user.username, capability.capability_type, capability.id)
-      await refresh()
+      const session = await createSession(reservation.id, auth.user.username, capability.capability_type, capability.id)
+      navigate(`/sessions/${session.id}`)
     } catch (error) {
       setMessage(errorMessage(error))
     } finally {
@@ -110,7 +112,8 @@ export default function MyReservations() {
               <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
                 {activeSession ? (
                   <div className="inline-note">
-                    Session active: {activeSession.capability_type} (expires {prettyDate(activeSession.expires_at)})
+                    Session active: {activeSession.capability_type} (expires {prettyDate(activeSession.expires_at)}){' '}
+                    <Link to={`/sessions/${activeSession.id}`}>Open workspace</Link>
                   </div>
                 ) : capabilities.length > 0 ? (
                   capabilities.map((capability) => (

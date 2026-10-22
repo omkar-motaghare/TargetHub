@@ -135,12 +135,18 @@ export type AuditEntry = {
   created_at: string
 }
 
-export type SessionOperationList = string[]
+export type SessionOperationList = {
+  session_id: string
+  capability_type: CapabilityType
+  operations: string[]
+}
 
 export type ProviderResult = {
-  success: boolean
+  session_id: string
+  capability_type: CapabilityType
+  operation: string
   message: string
-  data?: Record<string, unknown>
+  data: Record<string, unknown>
 }
 
 export type TargetCreateInput = {

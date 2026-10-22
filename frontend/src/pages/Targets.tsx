@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { createReservation, listReservations, listTargets, releaseReservation } from '../services/api'
 import { useAuth } from '../services/auth'
 import type { Reservation, Target } from '../services/types'
-import { classifyTargetStatus, errorMessage, prettyDate } from '../utils/ui'
+import { classifyTargetStatus, errorMessage, prettyDate, toLocalInputValue } from '../utils/ui'
 
 function findActiveReservation(targetId: string, reservations: Reservation[]): Reservation | undefined {
   return reservations.find((item) => item.target_id === targetId && item.status === 'active')
@@ -52,8 +52,8 @@ export default function Targets() {
   function openReserveModal(targetId: string): void {
     setReservingTarget(targetId)
     const now = new Date()
-    setStartsAt(new Date(now.getTime()).toISOString().slice(0, 16))
-    setEndsAt(new Date(now.getTime() + 30 * 60 * 1000).toISOString().slice(0, 16))
+    setStartsAt(toLocalInputValue(now))
+    setEndsAt(toLocalInputValue(new Date(now.getTime() + 30 * 60 * 1000)))
   }
 
   async function handleReserve(targetId: string): Promise<void> {
