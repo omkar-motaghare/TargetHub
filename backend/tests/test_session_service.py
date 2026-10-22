@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 
@@ -28,7 +28,7 @@ class FakeAgent:
     enabled: bool = True
     status: str = "online"
     last_seen_at: datetime | None = field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.now(UTC)
     )
     credential_hash: str | None = "cred-hash"
     credential_revoked_at: datetime | None = None
@@ -100,7 +100,7 @@ class FakeSessionRepo:
 
 
 def _active_reservation():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return FakeReservation("r1", "t1", "user1", now - timedelta(minutes=1), now + timedelta(minutes=30))
 
 
@@ -120,7 +120,7 @@ def _mapped_serial_capability(
     resource_available: bool = True,
     last_seen_delta_seconds: int = 0,
 ):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     agent = FakeAgent(
         id="agent-1",
         enabled=agent_enabled,
