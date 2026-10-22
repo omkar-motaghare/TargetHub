@@ -1,40 +1,84 @@
 from __future__ import annotations
 
-import os
-import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.core.exceptions import ConflictResource, ResourceNotFound
-from app.providers.serial import SerialProvider, SerialProviderConfig
+from app.core.metrics import metrics
+from app.providers import registry
+from app.providers.base import TargetProvider
 from app.repositories.session_repository import SessionRepository
+from app.repositories.target_repository import TargetRepository
+from app.services.agent_operation_service import AgentOperationService
+from app.services.audit_service import AuditService
+from app.services.capability_binding import validate_capability_runtime_binding
 
 
 def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
-
-
-def _env_prefix(provider_key: str) -> str:
-    normalized = re.sub(r"[^A-Za-z0-9]+", "_", provider_key).strip("_").upper()
-    return f"TARGETHUB_{normalized}"
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 class ProviderGateway:
     """Session-gated dispatch for provider operations.
 
-    This is a prototype in-process gateway. It keeps provider instances in
-    memory per session so open/read/write/close can share the same connection.
+    Every operation is authorized against an active, owned, unexpired session
+    before it reaches a provider. Provider instances are cached per session so
+    stateful transports (e.g. an open serial connection) persist across calls.
     """
 
-    _serial_providers: dict[str, SerialProvider] = {}
+    _providers: dict[str, TargetProvider] = {}
 
-    def __init__(self, session_repository: SessionRepository):
+    def __init__(
+        self,
+        session_repository: SessionRepository,
+        audit_service: AuditService | None = None,
+        target_repository: TargetRepository | None = None,
+        agent_operation_service: AgentOperationService | None = None,
+    ):
         self.session_repository = session_repository
+        self.audit_service = audit_service
+        self.target_repository = target_repository
+        self.agent_operation_service = agent_operation_service
+
+    @staticmethod
+    def _uses_agent_serial_transport(session) -> bool:
+        return (
+            session.capability_type == "serial"
+            and bool(session.agent_id)
+            and bool(session.resource_id)
+        )
+
+    def _validate_runtime_binding(self, session):
+        if self.target_repository is None:
+            return None
+        if not session.capability_id:
+            raise ConflictResource("Session is missing capability binding information")
+
+        target = self.target_repository.get(session.target_id)
+        if target is None:
+            raise ResourceNotFound("Target", session.target_id)
+
+        capability = next(
+            (item for item in target.capabilities if item.id == session.capability_id),
+            None,
+        )
+        if capability is None or not capability.enabled:
+            raise ConflictResource("Configured capability is unavailable")
+
+        if capability.capability_type != session.capability_type:
+            raise ConflictResource("Session capability no longer matches configured capability")
+        if capability.provider_key != session.provider_key:
+            raise ConflictResource("Session provider no longer matches configured capability")
+        if capability.agent_id != session.agent_id or capability.resource_id != session.resource_id:
+            raise ConflictResource("Session Agent/resource binding no longer matches configured capability")
+
+        validate_capability_runtime_binding(capability)
+        return capability
 
     def _get_active_session(self, session_id: str, user_id: str):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         self.session_repository.expire_due(now)
 
         session = self.session_repository.get(session_id)
@@ -46,117 +90,155 @@ class ProviderGateway:
             raise ConflictResource(f"Session '{session_id}' is {session.status}")
         if _as_utc(session.expires_at) <= now:
             raise ConflictResource("Session has expired")
-        if not session.provider_key:
-            raise ConflictResource("Session has no provider binding")
-        if session.capability_type != "serial":
+        if not registry.is_supported(session.capability_type):
             raise ConflictResource(
-                f"Capability type '{session.capability_type}' is not supported by this endpoint"
+                f"Capability type '{session.capability_type}' has no provider"
             )
-
+        capability = self._validate_runtime_binding(session)
+        provider_config = {}
+        if capability is not None:
+            provider_config = capability.provider_config or {}
+        setattr(session, "_provider_config", provider_config)
         return session
 
-    def _build_serial_provider(self, provider_key: str) -> SerialProvider:
-        prefix = _env_prefix(provider_key)
-        port = os.getenv(f"{prefix}_PORT")
-        if not port:
-            raise ConflictResource(f"Serial provider '{provider_key}' is not configured")
-
-        try:
-            baudrate = int(os.getenv(f"{prefix}_BAUDRATE", "115200"))
-            timeout = float(os.getenv(f"{prefix}_TIMEOUT", "0.2"))
-        except ValueError as exc:
-            raise ConflictResource("Invalid serial provider configuration") from exc
-
-        return SerialProvider(
-            SerialProviderConfig(
-                provider_key=provider_key,
-                port=port,
-                baudrate=baudrate,
-                timeout=timeout,
-            )
-        )
-
-    def _ensure_open_serial_provider(self, session_id: str, provider_key: str) -> SerialProvider:
-        provider = self._serial_providers.get(session_id)
+    def _get_provider(self, session) -> TargetProvider:
+        provider = self._providers.get(session.id)
         if provider is None:
-            provider = self._build_serial_provider(provider_key)
-            open_result = provider.open()
-            if not open_result.success:
-                raise ConflictResource(open_result.message)
-            self._serial_providers[session_id] = provider
+            provider_key = session.provider_key or f"{session.capability_type}:{session.target_id}"
+            provider_config = getattr(session, "_provider_config", {})
+            provider = registry.build_provider(session.capability_type, provider_key, provider_config)
+            self._providers[session.id] = provider
         return provider
 
     @staticmethod
-    def _normalize_serial_data(data: dict[str, Any] | None) -> dict[str, Any] | None:
+    def _normalize(data: dict[str, Any] | None) -> dict[str, Any] | None:
         if not data or "data" not in data:
             return data
-
         payload = dict(data)
         raw = payload.get("data")
-        if isinstance(raw, bytes):
-            payload["data_hex"] = raw.hex()
-            payload["data_text"] = raw.decode("utf-8", errors="replace")
+        if isinstance(raw, (bytes, bytearray)):
+            payload["data_hex"] = bytes(raw).hex()
+            payload["data_text"] = bytes(raw).decode("utf-8", errors="replace")
             payload["data"] = payload["data_text"]
         return payload
 
-    def serial_open(self, session_id: str, user_id: str):
+    def operations_for(self, session_id: str, user_id: str) -> dict[str, Any]:
         session = self._get_active_session(session_id, user_id)
-        provider = self._ensure_open_serial_provider(session_id, session.provider_key)
-        result = provider.health_check()
-        if not result.success:
-            raise ConflictResource(result.message)
+        if self._uses_agent_serial_transport(session):
+            operations = AgentOperationService.serial_operations()
+        else:
+            provider = self._get_provider(session)
+            operations = provider.operations()
         return {
-            "session_id": session_id,
+            "session_id": session.id,
+            "capability_type": session.capability_type,
             "provider_key": session.provider_key,
-            "status": "open",
-            "provider": result.data or {},
+            "operations": operations,
         }
+
+    def execute(
+        self, session_id: str, user_id: str, operation: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        session = self._get_active_session(session_id, user_id)
+        try:
+            if self._uses_agent_serial_transport(session):
+                if operation not in AgentOperationService.serial_operations():
+                    raise ConflictResource(
+                        f"Operation '{operation}' is not supported by capability '{session.capability_type}'"
+                    )
+                if self.agent_operation_service is None:
+                    raise ConflictResource("Agent serial transport is not configured")
+                remote_result = self.agent_operation_service.execute_serial(
+                    session=session,
+                    user_id=user_id,
+                    operation=operation,
+                    params=params or {},
+                )
+                result_message = remote_result.get("message", "ok")
+                result_data = remote_result.get("data")
+                result_success = True
+            else:
+                provider = self._get_provider(session)
+                if operation not in provider.operations():
+                    raise ConflictResource(
+                        f"Operation '{operation}' is not supported by capability '{session.capability_type}'"
+                    )
+                result = provider.execute(operation, params or {})
+                result_message = result.message
+                result_data = result.data
+                result_success = result.success
+        except ConflictResource as exc:
+            metrics.inc(
+                "targethub_provider_operations_total",
+                labels={
+                    "capability": session.capability_type,
+                    "operation": operation,
+                    "success": "false",
+                },
+            )
+            if self.audit_service is not None:
+                self.audit_service.record(
+                    action="provider.execute",
+                    user_id=user_id,
+                    target_id=session.target_id,
+                    session_id=session.id,
+                    provider_key=session.provider_key,
+                    capability_type=session.capability_type,
+                    operation=operation,
+                    success=False,
+                    detail=str(exc),
+                )
+            raise
+
+        metrics.inc(
+            "targethub_provider_operations_total",
+            labels={
+                "capability": session.capability_type,
+                "operation": operation,
+                "success": str(result_success).lower(),
+            },
+        )
+        if self.audit_service is not None:
+            self.audit_service.record(
+                action="provider.execute",
+                user_id=user_id,
+                target_id=session.target_id,
+                session_id=session.id,
+                provider_key=session.provider_key,
+                capability_type=session.capability_type,
+                operation=operation,
+                success=result_success,
+                detail=result_message,
+            )
+
+        if not result_success:
+            raise ConflictResource(result_message)
+
+        return {
+            "session_id": session.id,
+            "capability_type": session.capability_type,
+            "provider_key": session.provider_key,
+            "operation": operation,
+            "message": result_message,
+            "data": self._normalize(result_data),
+        }
+
+    def release_session(self, session_id: str) -> None:
+        """Drop any cached provider for a closed/expired session."""
+        self._providers.pop(session_id, None)
+
+    # Backward-compatible serial helpers used by existing endpoints/UI.
+    def serial_open(self, session_id: str, user_id: str):
+        return self.execute(session_id, user_id, "open")
 
     def serial_read(self, session_id: str, user_id: str, size: int = 4096):
-        session = self._get_active_session(session_id, user_id)
-        provider = self._ensure_open_serial_provider(session_id, session.provider_key)
-        result = provider.read(size=size)
-        if not result.success:
-            raise ConflictResource(result.message)
-
-        return {
-            "session_id": session_id,
-            "provider_key": session.provider_key,
-            "message": result.message,
-            "data": self._normalize_serial_data(result.data),
-        }
+        # Ensure the transport is open, then read (idempotent open).
+        self.execute(session_id, user_id, "open")
+        return self.execute(session_id, user_id, "read", {"size": size})
 
     def serial_write(self, session_id: str, user_id: str, text: str):
-        session = self._get_active_session(session_id, user_id)
-        provider = self._ensure_open_serial_provider(session_id, session.provider_key)
-        result = provider.write(text.encode("utf-8"))
-        if not result.success:
-            raise ConflictResource(result.message)
-
-        return {
-            "session_id": session_id,
-            "provider_key": session.provider_key,
-            "message": result.message,
-            "data": result.data or {},
-        }
+        self.execute(session_id, user_id, "open")
+        return self.execute(session_id, user_id, "write", {"text": text})
 
     def serial_close(self, session_id: str, user_id: str):
-        session = self._get_active_session(session_id, user_id)
-        provider = self._serial_providers.pop(session_id, None)
-        if provider is None:
-            return {
-                "session_id": session_id,
-                "provider_key": session.provider_key,
-                "status": "closed",
-                "message": "Serial connection already closed",
-            }
-
-        result = provider.close()
-        if not result.success:
-            raise ConflictResource(result.message)
-        return {
-            "session_id": session_id,
-            "provider_key": session.provider_key,
-            "status": "closed",
-            "message": result.message,
-        }
+        return self.execute(session_id, user_id, "close")

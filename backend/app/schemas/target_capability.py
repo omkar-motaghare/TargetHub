@@ -13,6 +13,7 @@ class CapabilityType(StrEnum):
     JLINK = "jlink"
     POWER = "power"
     RESET = "reset"
+    DEPLOY = "deploy"
 
 
 class TargetCapabilityBase(BaseModel):

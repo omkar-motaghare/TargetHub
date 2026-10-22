@@ -25,10 +25,29 @@ class SerialProvider(TargetProvider):
     operation is dispatched here.
     """
 
+    capability_type = "serial"
+
     def __init__(self, config: SerialProviderConfig) -> None:
         self.config = config
         self.provider_key = config.provider_key
         self._serial: Any | None = None
+
+    def operations(self) -> list[str]:
+        return ["health", "open", "read", "write", "close"]
+
+    def execute(self, operation, params=None):
+        params = params or {}
+        if operation == "open":
+            return self.open()
+        if operation == "read":
+            return self.read(size=int(params.get("size", 4096)))
+        if operation == "write":
+            text = params.get("text", "")
+            data = text.encode("utf-8") if isinstance(text, str) else bytes(text)
+            return self.write(data)
+        if operation == "close":
+            return self.close()
+        return super().execute(operation, params)
 
     def health_check(self) -> ProviderOperationResult:
         try:
@@ -112,3 +131,57 @@ class SerialProvider(TargetProvider):
             )
         except OSError as exc:
             return ProviderOperationResult(False, f"Failed to read serial data: {exc}")
+
+
+class SimulatedSerialProvider(TargetProvider):
+    """In-memory serial provider used when no physical port is configured.
+
+    Lets the serial-console workflow be demonstrated end-to-end without
+    hardware. Bytes written are echoed back with a simulated device banner.
+    """
+
+    capability_type = "serial"
+
+    def __init__(self, provider_key: str) -> None:
+        self.provider_key = provider_key
+        self._open = False
+        self._buffer = ""
+
+    def operations(self) -> list[str]:
+        return ["health", "open", "read", "write", "close"]
+
+    def health_check(self) -> ProviderOperationResult:
+        return ProviderOperationResult(
+            True,
+            "Simulated serial port is available",
+            {"provider_key": self.provider_key, "mode": "simulated"},
+        )
+
+    def execute(self, operation, params=None):
+        params = params or {}
+        if operation == "open":
+            if not self._open:
+                self._open = True
+                self._buffer = f"[simulated:{self.provider_key}] console ready\r\n"
+            return ProviderOperationResult(True, "Serial connection opened", {"mode": "simulated"})
+        if operation == "close":
+            self._open = False
+            self._buffer = ""
+            return ProviderOperationResult(True, "Serial connection closed", {"mode": "simulated"})
+        if operation == "write":
+            if not self._open:
+                return ProviderOperationResult(False, "Serial connection is not open")
+            text = params.get("text", "")
+            self._buffer += f"{text}\r\n"
+            return ProviderOperationResult(True, "Serial data written", {"bytes_written": len(str(text))})
+        if operation == "read":
+            if not self._open:
+                return ProviderOperationResult(False, "Serial connection is not open")
+            data = self._buffer
+            self._buffer = ""
+            return ProviderOperationResult(
+                True,
+                "Serial data read",
+                {"data": data.encode("utf-8"), "bytes_read": len(data)},
+            )
+        return super().execute(operation, params)

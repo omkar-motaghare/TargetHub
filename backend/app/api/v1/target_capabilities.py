@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_db, require_role
+from app.repositories.agent_repository import AgentRepository
 from app.repositories.target_capability_repository import TargetCapabilityRepository
 from app.repositories.target_repository import TargetRepository
 from app.schemas.target_capability import (
@@ -23,6 +24,7 @@ def get_service(db: Annotated[Session, Depends(get_db)]) -> TargetCapabilityServ
     return TargetCapabilityService(
         TargetCapabilityRepository(db),
         TargetRepository(db),
+        AgentRepository(db),
     )
 
 

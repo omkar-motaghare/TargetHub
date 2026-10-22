@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_db, require_role
+from app.repositories.agent_repository import AgentRepository
 from app.repositories.target_repository import TargetRepository
 from app.schemas.target import TargetCreate, TargetResponse, TargetUpdate
 from app.services.target_service import TargetService
@@ -12,7 +13,7 @@ router = APIRouter(prefix="/targets", tags=["Targets"])
 
 
 def get_service(db: Annotated[Session, Depends(get_db)]) -> TargetService:
-    return TargetService(TargetRepository(db))
+    return TargetService(TargetRepository(db), AgentRepository(db))
 
 
 Service = Annotated[TargetService, Depends(get_service)]
