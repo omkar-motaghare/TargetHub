@@ -27,6 +27,14 @@ This document is a point-in-time record of the review. It should be revisited wh
 | 3 | Fixed | Overlap check and insert run behind a per-target write lock (row lock on Postgres, write lock on SQLite). A Postgres exclusion constraint remains a possible defense-in-depth follow-up. | `tests/test_reservation_service.py::test_concurrent_overlapping_reservations_allow_exactly_one` (SQLite serializes writers, so this test cannot prove the Postgres path) |
 | 4 | Fixed | Enrollment command downloads then verifies the installer sha256; installer verifies the agent sha256, refuses `http://` without `--allow-insecure-http`, and runs the service as a dedicated `targethub` user with a hardened unit | `tests/test_installer.py` |
 
+### Final pass (2026-10-22, v0.1.0)
+
+- Findings 1-4 re-verified: regression tests above pass (full backend suite 154 passed); the reservation race test also passes against PostgreSQL 16 (`TARGETHUB_TEST_DATABASE_URL`).
+- Secret scan of tracked files: no hardcoded secrets, no `.env`/`*.db` tracked (only `.env.example`); test fixtures use throwaway passwords.
+- `pip-audit -r backend/requirements.txt`: no known vulnerabilities.
+- `npm audit` (frontend): 2 moderate in runtime dependency `react-router` (open redirect/SSR hydration advisories; fix requires v7 major upgrade, deferred); dev-only advisories (vitest/tinypool critical, esbuild, source-map-js) affect test/build tooling only. VS Code extension: 0 runtime vulnerabilities, 6 dev-only.
+- Residual: sessions still expose `agent_id`/`resource_id` to the session owner; no PostgreSQL exclusion constraint.
+
 ---
 
 ## Finding 1 — Hardcoded fallback `SECRET_KEY` (HIGH, confidence 7/10)
