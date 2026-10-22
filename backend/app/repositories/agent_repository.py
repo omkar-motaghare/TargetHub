@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent, AgentEnrollment, AgentResource
+from app.models.target_capability import TargetCapability
 
 
 class AgentRepository:
@@ -16,6 +17,9 @@ class AgentRepository:
 
     def get(self, agent_id: str):
         return self.db.query(Agent).filter(Agent.id == agent_id).first()
+
+    def get_resource(self, resource_id: str):
+        return self.db.query(AgentResource).filter(AgentResource.id == resource_id).first()
 
     def get_by_name(self, name: str):
         return self.db.query(Agent).filter(Agent.name == name).first()
@@ -58,9 +62,24 @@ class AgentRepository:
         self.db.refresh(agent)
         return agent
 
+    def disable_capabilities_for_agent(self, agent_id: str) -> int:
+        rows = (
+            self.db.query(TargetCapability)
+            .filter(
+                TargetCapability.agent_id == agent_id,
+                TargetCapability.enabled.is_(True),
+            )
+            .all()
+        )
+        for capability in rows:
+            capability.enabled = False
+        if rows:
+            self.db.commit()
+        return len(rows)
+
     def delete_enrollment(self, enrollment: AgentEnrollment):
         self.db.delete(enrollment)
         self.db.commit()
 
     def utc_now(self) -> datetime:
-        return datetime.utcnow()
+        return datetime.now(UTC)

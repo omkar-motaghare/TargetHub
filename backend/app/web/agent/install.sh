@@ -53,11 +53,25 @@ UNIT_FILE="/etc/systemd/system/targethub-agent@.service"
 INSTANCE="$(printf '%s' "$ENROLLMENT_TOKEN" | sha256sum | cut -c1-16)"
 CONFIG_PATH="$CONFIG_DIR/${INSTANCE}.json"
 SERVICE_NAME="targethub-agent@${INSTANCE}.service"
+AGENT_PATH="$BASE_DIR/targethub_agent.py"
+TEMP_AGENT_PATH="$BASE_DIR/targethub_agent.py.tmp"
+CREATED_CONFIG="0"
+
+cleanup_on_error() {
+  rm -f "$TEMP_AGENT_PATH"
+  if [[ "$CREATED_CONFIG" == "1" ]]; then
+    rm -f "$CONFIG_PATH"
+  fi
+}
+trap cleanup_on_error ERR
 
 mkdir -p "$BASE_DIR" "$CONFIG_DIR"
+chmod 0700 "$CONFIG_DIR"
 
-curl -fsSL "${TARGETHUB_URL%/}/web/agent/targethub_agent.py" -o "$BASE_DIR/targethub_agent.py"
-chmod 0755 "$BASE_DIR/targethub_agent.py"
+curl -fsSL "${TARGETHUB_URL%/}/web/agent/targethub_agent.py" -o "$TEMP_AGENT_PATH"
+python3 -m py_compile "$TEMP_AGENT_PATH"
+chmod 0755 "$TEMP_AGENT_PATH"
+mv "$TEMP_AGENT_PATH" "$AGENT_PATH"
 
 if [[ ! -f "$CONFIG_PATH" ]] || ! grep -q '"agent_id"' "$CONFIG_PATH"; then
   cat > "$CONFIG_PATH" <<EOF
@@ -65,10 +79,13 @@ if [[ ! -f "$CONFIG_PATH" ]] || ! grep -q '"agent_id"' "$CONFIG_PATH"; then
   "targethub_url": "${TARGETHUB_URL%/}",
   "enrollment_token": "$ENROLLMENT_TOKEN",
   "heartbeat_interval": 15,
+  "operation_poll_wait_seconds": 5,
+  "request_timeout": 15,
   "resources": []
 }
 EOF
   chmod 0600 "$CONFIG_PATH"
+  CREATED_CONFIG="1"
 fi
 
 cat > "$UNIT_FILE" <<'EOF'
@@ -90,6 +107,7 @@ EOF
 
 systemctl daemon-reload
 systemctl enable --now "$SERVICE_NAME"
+trap - ERR
 
 echo
 echo "TargetHub Agent instance installed and started: $SERVICE_NAME"

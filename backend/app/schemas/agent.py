@@ -1,14 +1,22 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class AgentResourceCreate(BaseModel):
-    resource_key: str
-    resource_type: str
-    display_name: str
+    resource_key: str = Field(min_length=1, max_length=255)
+    resource_type: str = Field(min_length=1, max_length=64)
+    display_name: str = Field(min_length=1, max_length=255)
     metadata: dict = Field(default_factory=dict)
     available: bool = True
+
+    @field_validator("resource_key", "resource_type", "display_name")
+    @classmethod
+    def validate_non_blank(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("must not be blank")
+        return normalized
 
 
 class AgentResourceResponse(BaseModel):
@@ -62,6 +70,38 @@ class AgentEnrollResponse(BaseModel):
 class AgentHeartbeat(BaseModel):
     hostname: str | None = None
     resources: list[AgentResourceCreate] = Field(default_factory=list)
+
+
+class AgentOperationPollRequest(BaseModel):
+    wait_seconds: int = Field(default=10, ge=0, le=30)
+    lease_seconds: int = Field(default=30, ge=5, le=120)
+
+
+class AgentOperationPayload(BaseModel):
+    id: str
+    session_id: str
+    resource_id: str
+    resource_key: str
+    resource_type: str
+    resource_metadata: dict = Field(default_factory=dict)
+    operation: str
+    params: dict = Field(default_factory=dict)
+    requested_at: datetime
+
+
+class AgentOperationPollResponse(BaseModel):
+    operation: AgentOperationPayload | None = None
+
+
+class AgentOperationCompleteRequest(BaseModel):
+    success: bool
+    message: str = ""
+    data: dict = Field(default_factory=dict)
+
+
+class AgentOperationCompleteResponse(BaseModel):
+    status: str
+    operation_id: str
 
 
 class AgentResponse(BaseModel):

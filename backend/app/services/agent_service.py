@@ -1,13 +1,12 @@
 import hashlib
 import hmac
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.core.config import settings
 from app.core.exceptions import AuthenticationError, ConflictResource, ResourceNotFound
 from app.models.agent import Agent, AgentEnrollment, AgentResource
 from app.repositories.agent_repository import AgentRepository
-
 
 ENROLLMENT_TTL_MINUTES = 30
 AGENT_OFFLINE_AFTER_SECONDS = 45
@@ -31,7 +30,7 @@ class AgentService:
 
     @staticmethod
     def _now() -> datetime:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
     def _refresh_liveness(self, agents: list[Agent]):
         cutoff = self._now() - timedelta(seconds=AGENT_OFFLINE_AFTER_SECONDS)
@@ -41,7 +40,7 @@ class AgentService:
                 continue
             last_seen = agent.last_seen_at
             if last_seen.tzinfo is None:
-                last_seen = last_seen.replace(tzinfo=timezone.utc)
+                last_seen = last_seen.replace(tzinfo=UTC)
             if last_seen < cutoff:
                 agent.status = "offline"
                 changed_agents.append(agent)
@@ -98,7 +97,7 @@ class AgentService:
 
         expires_at = enrollment.expires_at
         if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
+            expires_at = expires_at.replace(tzinfo=UTC)
         if expires_at <= self._now():
             raise ConflictResource("Enrollment token has expired")
 
@@ -150,24 +149,43 @@ class AgentService:
         agent.hostname = hostname or agent.hostname
         agent.status = "online"
         agent.last_seen_at = self._now()
-        agent.resources.clear()
+
+        existing_by_key = {(item.resource_key, item.resource_type): item for item in agent.resources}
+        seen_keys: set[tuple[str, str]] = set()
+        next_resources: list[AgentResource] = []
+
         for item in resources:
-            agent.resources.append(
-                AgentResource(
+            key = (item.resource_key, item.resource_type)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+
+            current = existing_by_key.get(key)
+            if current is None:
+                current = AgentResource(
                     resource_key=item.resource_key,
                     resource_type=item.resource_type,
                     display_name=item.display_name,
                     resource_metadata=item.metadata,
                     available=item.available,
                 )
-            )
+            else:
+                current.display_name = item.display_name
+                current.resource_metadata = item.metadata
+                current.available = item.available
+
+            next_resources.append(current)
+
+        agent.resources[:] = next_resources
         return self.repository.save(agent)
 
     def disable(self, agent_id: str):
         agent = self.get_agent(agent_id)
         agent.enabled = False
         agent.status = "disabled"
-        return self.repository.save(agent)
+        self.repository.save(agent)
+        self.repository.disable_capabilities_for_agent(agent.id)
+        return self.get_agent(agent_id)
 
     def enable(self, agent_id: str):
         agent = self.get_agent(agent_id)
@@ -182,4 +200,6 @@ class AgentService:
         agent.credential_prefix = None
         agent.credential_revoked_at = self._now()
         agent.status = "offline" if agent.enabled else "disabled"
-        return self.repository.save(agent)
+        self.repository.save(agent)
+        self.repository.disable_capabilities_for_agent(agent.id)
+        return self.get_agent(agent_id)
