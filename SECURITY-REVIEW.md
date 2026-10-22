@@ -35,6 +35,15 @@ This document is a point-in-time record of the review. It should be revisited wh
 - `npm audit` (frontend): 2 moderate in runtime dependency `react-router` (open redirect/SSR hydration advisories; fix requires v7 major upgrade, deferred); dev-only advisories (vitest/tinypool critical, esbuild, source-map-js) affect test/build tooling only. VS Code extension: 0 runtime vulnerabilities, 6 dev-only.
 - Residual: sessions still expose `agent_id`/`resource_id` to the session owner; no PostgreSQL exclusion constraint.
 
+### Follow-up (post-review items)
+
+| Item | Status | Fix | Regression test |
+|------|--------|-----|-----------------|
+| No throttling on `POST /auth/token`, `/auth/change-password`, `/auth/bootstrap` (medium) | Fixed | Failed attempts counted per client IP + username (and per IP at 4x); after `AUTH_MAX_FAILURES` (default 5) within `AUTH_FAILURE_WINDOW_SECONDS` (default 300) the API returns 429 with `Retry-After`. A successful login resets the counter. | `tests/test_auth_rbac.py` (lockout, per-username, change-password, bootstrap) |
+| Enrollment token check-then-set race (low) | Fixed | `claim_enrollment` is a conditional `UPDATE ... WHERE used_at IS NULL` executed before the agent/credential is touched; the loser gets 409 | `tests/test_agent_enrollment.py` (lost race, atomic claim on a real DB) |
+
+Limits of the rate limiter: counters are in process memory, so they reset on restart and are per worker (run a single worker, or add a reverse-proxy limit, for strict enforcement). The client IP is the direct peer address; behind a reverse proxy all users share the proxy's IP, so the IP-wide cap (20 failures) applies to everyone together. Forwarded headers are deliberately not trusted.
+
 ---
 
 ## Finding 1 — Hardcoded fallback `SECRET_KEY` (HIGH, confidence 7/10)

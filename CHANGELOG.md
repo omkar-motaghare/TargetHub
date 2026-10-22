@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Security
+- Login, password change and admin bootstrap are rate limited after repeated failures (`AUTH_MAX_FAILURES`, `AUTH_FAILURE_WINDOW_SECONDS`); responses are 429 with `Retry-After`.
+- Agent enrollment tokens are claimed atomically, so concurrent requests cannot both mint a credential.
+
+### Agent
+- Installer works on BusyBox/Yocto images without `curl`, `useradd`, `getent` or `usermod` (falls back to `wget`/Python and `adduser`/`addgroup`).
+- Agent verifies its config is writable before spending a single-use enrollment token.
+- Verified on a Raspberry Pi 5 (Yocto, read-only NFS root): enrollment, discovery, pty serial, fake-GPIO power, restart and offline detection, hardened systemd unit. Real GPIO, a real serial target and a persistent install (needs the Yocto image) remain untested.
+
 ## v0.1.0 — 2026-10-22
 
 First tagged release (local tag; not published).
