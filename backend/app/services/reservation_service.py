@@ -55,6 +55,7 @@ class ReservationService:
         ends_at = ends_at.astimezone(UTC)
         self.repository.expire_due(datetime.now(UTC))
 
+        self.repository.lock_target(target_id)
         conflict = self.repository.find_overlapping_active(
             target_id,
             starts_at,

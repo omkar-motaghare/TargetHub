@@ -41,6 +41,9 @@ class FakeReservationRepo:
     def get(self, reservation_id):
         return next((r for r in self.items if r.id == reservation_id), None)
 
+    def lock_target(self, target_id):
+        return None
+
     def find_overlapping_active(self, target_id, starts_at, ends_at):
         for r in self.items:
             if r.target_id == target_id and r.status == "active":
@@ -148,3 +151,46 @@ def test_force_release_closes_active_sessions_for_reservation():
     assert service.session_repository.closed
     closed_reservation_id, _closed_at = service.session_repository.closed[0]
     assert closed_reservation_id == reservation.id
+
+
+def test_concurrent_overlapping_reservations_allow_exactly_one(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.models.base import Base
+    from app.models.target import Target
+    from app.repositories.reservation_repository import ReservationRepository
+    from app.repositories.session_repository import SessionRepository
+    from app.repositories.target_repository import TargetRepository
+
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'race.sqlite3'}",
+        connect_args={"check_same_thread": False, "timeout": 30},
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    with factory() as db:
+        db.add(Target(id="race-target", name="race"))
+        db.commit()
+
+    start = datetime.now(UTC) + timedelta(hours=1)
+    end = start + timedelta(hours=1)
+
+    def attempt(n: int) -> bool:
+        with factory() as db:
+            service = ReservationService(
+                ReservationRepository(db), TargetRepository(db), SessionRepository(db)
+            )
+            try:
+                service.create_reservation("race-target", f"user{n}", start, end)
+            except ConflictResource:
+                return False
+            return True
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(attempt, range(8)))
+
+    assert results.count(True) == 1
+    engine.dispose()

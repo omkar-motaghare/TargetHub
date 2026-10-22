@@ -4,6 +4,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.models.reservation import Reservation
+from app.models.target import Target
 
 
 class ReservationRepository:
@@ -23,6 +24,13 @@ class ReservationRepository:
             self.db.query(Reservation)
             .filter(Reservation.id == reservation_id)
             .first()
+        )
+
+    def lock_target(self, target_id: str) -> None:
+        # No-op write: row lock on Postgres, write lock on SQLite. Held until commit,
+        # so the overlap check and insert run serialized per target.
+        self.db.execute(
+            update(Target).where(Target.id == target_id).values(updated_at=Target.updated_at)
         )
 
     def find_overlapping_active(
