@@ -1,0 +1,26 @@
+# TLS termination for the hub. Use together with the base file:
+#   TARGETHUB_DOMAIN=hub.example.com TARGETHUB_PUBLIC_URL=https://hub.example.com \
+#     docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
+# The API is no longer published on the host; only Caddy (80/443) is reachable.
+services:
+  api:
+    ports: !reset []
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      TARGETHUB_DOMAIN: ${TARGETHUB_DOMAIN:?set TARGETHUB_DOMAIN to the hub DNS name}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - targethub-caddy-data:/data
+      - targethub-caddy-config:/config
+    depends_on:
+      - api
+
+volumes:
+  targethub-caddy-data:
+  targethub-caddy-config:

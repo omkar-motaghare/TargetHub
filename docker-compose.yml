@@ -5,11 +5,11 @@ services:
     environment:
       POSTGRES_DB: targethub
       POSTGRES_USER: targethub
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
     volumes:
       - targethub-postgres:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
 
   redis:
     image: redis:7-alpine
@@ -18,18 +18,18 @@ services:
     volumes:
       - targethub-redis:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
 
   minio:
     image: minio/minio:latest
     profiles: ["object-storage"]
     restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-}
     command: server /data
     ports:
-      - "9000:9000"
+      - "127.0.0.1:9000:9000"
     volumes:
       - targethub-minio:/data
 
@@ -45,7 +45,7 @@ services:
       HOST: 0.0.0.0
       PORT: 8000
       LOG_LEVEL: INFO
-      DATABASE_URL: ${DATABASE_URL:-postgresql://targethub:${POSTGRES_PASSWORD:-changeme}@postgres:5432/targethub}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://targethub:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/targethub}
       SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY to a random 32+ character value}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
@@ -63,7 +63,7 @@ services:
       dockerfile: Dockerfile.worker
     restart: unless-stopped
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://targethub:${POSTGRES_PASSWORD:-changeme}@postgres:5432/targethub}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://targethub:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/targethub}
       SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY to a random 32+ character value}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     depends_on:
