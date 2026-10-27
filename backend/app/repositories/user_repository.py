@@ -1,3 +1,4 @@
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.models.user import User
@@ -9,6 +10,9 @@ class UserRepository:
 
     def get_by_username(self, username: str) -> User | None:
         return self.db.query(User).filter(User.username == username).first()
+
+    def get_by_username_ci(self, username: str) -> User | None:
+        return self.db.query(User).filter(func.lower(User.username) == username.strip().lower()).first()
 
     def create(self, user: User):
         self.db.add(user)

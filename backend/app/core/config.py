@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     # Bearer token for Prometheus scrapes of /metrics. Admin JWTs are also accepted.
     metrics_token: str | None = None
 
+    # Access tokens are short-lived; the UI renews them with a rotating refresh token.
+    access_token_minutes: int = 15
+    # PBKDF2-SHA256 work factor for new hashes; older hashes are upgraded at login.
+    password_hash_iterations: int = 600_000
+    refresh_token_hours: int = 168
+
     # Failed logins / password changes allowed per client IP + username within the window.
     auth_max_failures: int = 5
     auth_failure_window_seconds: int = 300

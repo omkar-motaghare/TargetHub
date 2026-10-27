@@ -92,11 +92,10 @@ def require_metrics_access(
     if expected and hmac.compare_digest(credentials.credentials, expected):
         return
     try:
-        payload = auth.verify_token(credentials.credentials)
+        user = auth.user_for_bearer(credentials.credentials)
     except Exception:
-        raise unauthorized
-    user = auth.repo.get_by_username(payload.get("sub", ""))
-    if not user or not is_admin_user(user):
+        raise unauthorized from None
+    if not is_admin_user(user):
         raise unauthorized
 
 

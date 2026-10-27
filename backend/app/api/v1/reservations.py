@@ -7,6 +7,7 @@ from app.api.dependencies import (
     get_current_user,
     get_db,
     is_admin_user,
+    require_operator,
     require_role,
     resolve_effective_user_id,
 )
@@ -72,7 +73,7 @@ def create_reservation(
     request: ReservationCreate,
     service: Service,
     audit: AuditDep,
-    user=Depends(get_current_user),
+    user=Depends(require_operator),
 ):
     payload = request.model_dump()
     payload["user_id"] = resolve_effective_user_id(user, payload.get("user_id"))

@@ -11,6 +11,9 @@ if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
 os.environ.setdefault("ENVIRONMENT", "development")
+os.environ.setdefault("SECRET_KEY", "test-secret-key")
+# Keep the suite fast; production uses the 600k default.
+os.environ.setdefault("PASSWORD_HASH_ITERATIONS", "20000")
 
 
 @pytest.fixture(autouse=True)
