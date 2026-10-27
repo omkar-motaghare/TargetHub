@@ -5,6 +5,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import sys
+
 import pytest
 
 
@@ -270,6 +272,7 @@ def test_serial_runtime_simulated_transport_roundtrip():
     assert closed["success"] is True
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
 def test_save_config_writes_mode_0600(tmp_path):
     runtime = _load_runtime_module()
     path = tmp_path / "agent.json"

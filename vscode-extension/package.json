@@ -66,12 +66,19 @@
   },
   "scripts": {
     "compile": "tsc -p .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "vscode:prepublish": "npm run compile",
+    "package": "npx --yes @vscode/vsce@3 package --no-dependencies --allow-missing-repository -o targethub-vscode.vsix"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
     "typescript": "^5.4.5",
     "vitest": "^4.1.12"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/omkar-motaghare/TargetHub.git",
+    "directory": "vscode-extension"
   }
 }

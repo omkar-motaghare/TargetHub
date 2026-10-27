@@ -5,53 +5,94 @@ on:
     branches: [develop, main]
   pull_request:
     branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backend:
-    name: Backend tests
+    name: Backend (lint, tests, live agent E2E)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Bootstrap backend environment
         run: bash scripts/bootstrap-backend.sh
       - name: Lint (ruff)
-        run: backend/.venv/bin/ruff check backend/app
-      - name: Compile backend
-        run: backend/.venv/bin/python -m compileall -q backend/app
-      - name: Run tests
+        run: backend/.venv/bin/ruff check backend/app backend/tests tools sdk/python --config backend/pyproject.toml
+      - name: Compile backend and agent
+        run: backend/.venv/bin/python -m compileall -q backend/app tools
+      - name: Agent runs on the oldest supported Python (3.9 syntax)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - run: python -m py_compile backend/app/web/agent/targethub_agent.py
+      - name: Tests (includes PowerShell installer tests via pwsh)
         env:
-          SECRET_KEY: ci-test-secret
+          SECRET_KEY: ci-test-secret-that-is-long-enough-123
+          TARGETHUB_PWSH: pwsh
         run: backend/.venv/bin/python -m pytest -q backend/tests/
       - name: Live agent E2E
         env:
-          SECRET_KEY: ci-test-secret
+          SECRET_KEY: ci-test-secret-that-is-long-enough-123
         run: bash scripts/e2e-agent.sh
 
+  postgres:
+    name: Backend on PostgreSQL 16
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: targethub
+          POSTGRES_PASSWORD: targethub
+          POSTGRES_DB: targethub
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U targethub" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: bash scripts/bootstrap-backend.sh
+      - name: Migrations upgrade/downgrade on PostgreSQL
+        working-directory: backend
+        env:
+          SECRET_KEY: ci-test-secret-that-is-long-enough-123
+          DATABASE_URL: postgresql://targethub:targethub@localhost:5432/targethub
+        run: |
+          .venv/bin/python -m alembic upgrade head
+          .venv/bin/python -m alembic downgrade base
+          .venv/bin/python -m alembic upgrade head
+
   frontend:
-    name: Frontend build
+    name: Frontend (typecheck, unit tests, build)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: "20"
-      - name: Install dependencies
-        run: npm install
-      - name: Build
-        run: npm run build
-      - name: Unit tests
-        run: npm test
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
 
   ui-smoke:
-    name: Browser smoke (Playwright)
+    name: Browser smoke (Playwright, system Chrome)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,18 +101,23 @@ jobs:
           python-version: "3.12"
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
-      - name: Bootstrap backend environment
-        run: bash scripts/bootstrap-backend.sh
-      - name: Install frontend dependencies
-        run: npm install
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: bash scripts/bootstrap-backend.sh
+      - run: npm ci
         working-directory: frontend
-      - name: Run browser smoke test (system Chrome)
+      - name: Run browser smoke test
+        env:
+          PLAYWRIGHT_CHANNEL: chrome
         run: bash scripts/e2e-ui.sh
 
   sdk:
     name: Python SDK and CLI
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
     defaults:
       run:
         working-directory: sdk/python
@@ -79,15 +125,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: Install
-        run: pip install -e ".[test]"
-      - name: Test
-        run: pytest -q
-      - name: Build wheel
-        run: pip wheel . --no-deps -w dist
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[test]"
+      - run: pytest -q
+      - run: pip wheel . --no-deps -w dist
 
   vscode-extension:
+    name: VS Code extension
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -96,7 +140,46 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
       - run: npm ci
       - run: npm run compile
       - run: npm test
+      - run: npm run package
+
+  windows-agent:
+    name: Agent and installers on Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Agent unit tests on Windows
+        shell: bash
+        run: |
+          python -m pip install -r backend/requirements.txt pytest pytest-asyncio httpx pyserial
+          cd backend
+          SECRET_KEY=ci-test-secret-that-is-long-enough-123 TARGETHUB_PWSH=pwsh \
+            python -m pytest -q tests/test_agent_portable.py tests/test_windows_installer.py tests/test_server_installers.py
+
+  docker:
+    name: Docker image builds and serves
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -f backend/Dockerfile -t targethub:ci .
+      - name: Start compose stack from the built image and wait until healthy
+        run: |
+          bash scripts/install.sh --port 18080 --project thci --image targethub:local --no-start
+          docker tag targethub:ci targethub:local
+          docker compose up -d --no-build --wait --wait-timeout 180
+          curl -fsS http://127.0.0.1:18080/health/ready
+          curl -fsS http://127.0.0.1:18080/app | grep -q '<div id="root">'
+          curl -fsS http://127.0.0.1:18080/web/agent/install.sh | head -1 | grep -q bash
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --tail=200
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

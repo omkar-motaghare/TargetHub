@@ -5,11 +5,10 @@ from datetime import timedelta
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 
 import pytest
-from pydantic import ValidationError
-
 from app.core.exceptions import ConflictResource
 from app.schemas.agent import AgentHeartbeat
 from app.services.agent_service import AgentService
+from pydantic import ValidationError
 
 
 class FakeRepository:
@@ -361,12 +360,11 @@ def test_enroll_loses_race_when_token_already_claimed():
 def test_claim_enrollment_is_atomic_on_a_real_database(tmp_path):
     from datetime import UTC, datetime
 
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
     from app.models.agent import AgentEnrollment
     from app.models.base import Base
     from app.repositories.agent_repository import AgentRepository
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
 
     engine = create_engine(f"sqlite:///{tmp_path / 'claim.sqlite3'}")
     Base.metadata.create_all(engine)

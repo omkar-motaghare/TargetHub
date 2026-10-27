@@ -7,6 +7,8 @@
 #   --bind ADDR      host address to publish on                (default: 0.0.0.0)
 #   --url URL        public URL users and agents will use      (default: http://<host>:<port>)
 #   --domain NAME    enable the Caddy TLS overlay for NAME (ports 80/443, API not published)
+#   --image REF      run a published image (e.g. ghcr.io/omkar-motaghare/targethub:0.2.0)
+#                    instead of building from source
 #   --no-start       write .env only
 #   --force          overwrite an existing .env (secrets are regenerated; the old file is kept as .env.bak)
 # An existing .env is reused as-is: re-running the script just (re)starts the stack.
@@ -20,10 +22,11 @@ PORT=8000
 BIND=0.0.0.0
 URL=""
 DOMAIN=""
+IMAGE=""
 START=1
 FORCE=0
 
-usage() { sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 die() { echo "install.sh: $*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
@@ -33,6 +36,7 @@ while [ $# -gt 0 ]; do
     --bind) BIND="${2:?--bind needs a value}"; shift 2 ;;
     --url) URL="${2:?--url needs a value}"; shift 2 ;;
     --domain) DOMAIN="${2:?--domain needs a value}"; shift 2 ;;
+    --image) IMAGE="${2:?--image needs a value}"; shift 2 ;;
     --no-start) START=0; shift ;;
     --force) FORCE=1; shift ;;
     -h | --help) usage; exit 0 ;;
@@ -87,24 +91,40 @@ else
     echo "METRICS_TOKEN=$(random_hex 16)"
     echo "LOG_LEVEL=INFO"
     echo "API_WORKERS=2"
+    [ -z "$IMAGE" ] || echo "TARGETHUB_IMAGE=$IMAGE"
   } >.env
   chmod 600 .env
   echo "Wrote .env with freshly generated secrets."
 fi
+
+env_value() { { grep -E "^$1=" .env || true; } | tail -n1 | cut -d= -f2-; }
+
+if [ -n "$IMAGE" ] && [ "$(env_value TARGETHUB_IMAGE)" != "$IMAGE" ]; then
+  # Reused .env: record the requested image without touching the secrets.
+  grep -v '^TARGETHUB_IMAGE=' .env >.env.tmp && echo "TARGETHUB_IMAGE=$IMAGE" >>.env.tmp
+  chmod 600 .env.tmp && mv .env.tmp .env
+fi
+IMAGE="$(env_value TARGETHUB_IMAGE)"
 
 if [ "$START" -eq 0 ]; then
   echo "Skipping start (--no-start). Run: docker compose up -d --build --wait"
   exit 0
 fi
 
-echo "Building and starting TargetHub (first build takes a few minutes)..."
-docker compose up -d --build --wait --wait-timeout 300 || {
+if [ -n "$IMAGE" ] && [ "$IMAGE" != "targethub:local" ]; then
+  echo "Pulling $IMAGE and starting TargetHub..."
+  docker compose pull >&2 || die "could not pull $IMAGE (check the tag and registry access)"
+  UP_ARGS=(--no-build)
+else
+  echo "Building and starting TargetHub (first build takes a few minutes)..."
+  UP_ARGS=(--build)
+fi
+docker compose up -d "${UP_ARGS[@]}" --wait --wait-timeout 300 || {
   docker compose ps >&2 || true
   docker compose logs --tail=60 >&2 || true
   die "stack did not become healthy"
 }
 
-env_value() { grep -E "^$1=" .env | tail -n1 | cut -d= -f2-; }
 echo
 echo "TargetHub is running: $(env_value TARGETHUB_PUBLIC_URL)/app"
 if [ "$(curl -fsS "http://127.0.0.1:$(env_value TARGETHUB_PORT)/api/v1/auth/setup-status" 2>/dev/null | grep -c '"setup_required":true')" -eq 1 ] \

@@ -6,7 +6,6 @@ from typing import Any
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 
 import pytest
-
 from app.core.exceptions import ConflictResource, ResourceNotFound
 from app.models.audit import AuditLog
 from app.services.audit_service import AuditService

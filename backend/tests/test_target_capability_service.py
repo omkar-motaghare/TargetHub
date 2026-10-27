@@ -4,7 +4,6 @@ from dataclasses import dataclass
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 
 import pytest
-
 from app.core.exceptions import ConflictResource, ResourceNotFound
 from app.services.target_capability_service import TargetCapabilityService
 

@@ -6,6 +6,7 @@ import io
 
 from app import manage
 from app.db.models.user import User
+
 from tests.helpers import api_client, bootstrap, create_user
 
 

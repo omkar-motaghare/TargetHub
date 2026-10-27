@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 
 import pytest
-
 from app.core.exceptions import ConflictResource, ResourceNotFound
 from app.services.reservation_service import ReservationService
 
@@ -175,14 +174,13 @@ def test_force_release_closes_active_sessions_for_reservation():
 def test_concurrent_overlapping_reservations_allow_exactly_one(tmp_path):
     from concurrent.futures import ThreadPoolExecutor
 
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
     from app.models.base import Base
     from app.models.target import Target
     from app.repositories.reservation_repository import ReservationRepository
     from app.repositories.session_repository import SessionRepository
     from app.repositories.target_repository import TargetRepository
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
 
     pg_url = os.environ.get("TARGETHUB_TEST_DATABASE_URL")
     if pg_url:

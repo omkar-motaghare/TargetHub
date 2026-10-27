@@ -8,9 +8,9 @@ import threading
 from pathlib import Path
 
 import pytest
-
 from app.core.config import settings
 from app.providers.dd_power import DDPowerProvider, build_dd_config
+
 from tests.helpers import api_client, auth, bootstrap, create_user, open_session, reserve
 
 ROOT = Path(__file__).resolve().parents[2]

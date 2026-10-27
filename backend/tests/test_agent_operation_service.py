@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 
 import pytest
-
 from app.core.exceptions import ConflictResource
 from app.models.agent_operation import AgentOperation
 from app.services.agent_operation_service import AgentOperationService

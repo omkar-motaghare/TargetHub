@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
@@ -50,7 +50,8 @@ app.add_exception_handler(
 app.include_router(api_router)
 
 WEB_DIR = Path(__file__).parent / "web"
-app.mount("/web", StaticFiles(directory=WEB_DIR), name="web")
+# Agent installers and the agent itself are downloaded from here by enrollment commands.
+app.mount("/web/agent", StaticFiles(directory=WEB_DIR / "agent"), name="agent-files")
 REACT_DIR = WEB_DIR / "react"
 REACT_ASSETS_DIR = REACT_DIR / "assets"
 
@@ -111,21 +112,27 @@ async def prometheus_metrics():
     return PlainTextResponse(metrics.render(), media_type="text/plain; version=0.0.4")
 
 
+SPA_MISSING = (
+    "<!doctype html><title>TargetHub</title><h1>TargetHub API is running</h1>"
+    "<p>The web UI has not been built. Run <code>npm ci &amp;&amp; npm run build</code> in "
+    "<code>frontend/</code> and copy <code>dist/</code> to <code>backend/app/web/react/</code>, "
+    "or use the Docker image, which includes it. API docs: <a href=\"/docs\">/docs</a>.</p>"
+)
+
+
+def _spa_index():
+    index = REACT_DIR / "index.html"
+    if index.exists():
+        return FileResponse(index, headers={"Cache-Control": "no-cache"})
+    return HTMLResponse(SPA_MISSING, status_code=503)
+
+
 @app.get("/dashboard", include_in_schema=False)
 async def dashboard():
-    if (REACT_DIR / "index.html").exists():
-        return FileResponse(REACT_DIR / "index.html")
-    return FileResponse(WEB_DIR / "index.html")
+    return RedirectResponse(url="/app", status_code=307)
 
 
 @app.get("/app", include_in_schema=False)
 @app.get("/app/{path:path}", include_in_schema=False)
 async def react_app(path: str = ""):
-    if (REACT_DIR / "index.html").exists():
-        return FileResponse(REACT_DIR / "index.html")
-    return FileResponse(WEB_DIR / "index.html")
-
-
-@app.get("/legacy-dashboard", include_in_schema=False)
-async def legacy_dashboard():
-    return FileResponse(WEB_DIR / "index.html")
+    return _spa_index()
