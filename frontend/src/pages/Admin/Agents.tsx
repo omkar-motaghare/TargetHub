@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 
 import {
   createAgentEnrollment,
@@ -6,15 +6,18 @@ import {
   enableAgent,
   listAgentEnrollments,
   listAgents,
+  listTargets,
   revokeAgentCredential,
 } from '../../services/api'
-import type { Agent, AgentEnrollment } from '../../services/types'
+import type { Agent, AgentEnrollment, Target } from '../../services/types'
 import { errorMessage, prettyDate } from '../../utils/ui'
 
 export default function AdminAgents() {
   const [platform, setPlatform] = useState<'linux' | 'windows'>('linux')
   const [name, setName] = useState('')
   const [agents, setAgents] = useState<Agent[]>([])
+  const [targets, setTargets] = useState<Target[]>([])
+  const [showAll, setShowAll] = useState(false)
   const [enrollments, setEnrollments] = useState<AgentEnrollment[]>([])
   const [latestEnrollment, setLatestEnrollment] = useState<AgentEnrollment | null>(null)
   const [loading, setLoading] = useState(true)
@@ -29,8 +32,9 @@ export default function AdminAgents() {
     setLoading(true)
     setMessage(null)
     try {
-      const [agentRows, enrollmentRows] = await Promise.all([listAgents(), listAgentEnrollments()])
+      const [agentRows, enrollmentRows, targetRows] = await Promise.all([listAgents(), listAgentEnrollments(), listTargets()])
       setAgents(agentRows)
+      setTargets(targetRows)
       setEnrollments(enrollmentRows)
     } catch (error) {
       setMessage(errorMessage(error))
@@ -38,6 +42,20 @@ export default function AdminAgents() {
       setLoading(false)
     }
   }
+
+  // resource id -> "TARGET · capability" labels, so admins see what each port or relay is wired to.
+  const usedBy = useMemo(() => {
+    const map: Record<string, string[]> = {}
+    for (const target of targets) {
+      for (const capability of target.capabilities || []) {
+        if (capability.resource_id) (map[capability.resource_id] ||= []).push(`${target.name} · ${capability.name}`)
+      }
+    }
+    return map
+  }, [targets])
+
+  // Network interfaces and GPIO chips are informational; hide them unless asked.
+  const HARDWARE_TYPES = ['serial', 'power', 'reset', 'deploy']
 
   async function handleCreate(event: React.FormEvent): Promise<void> {
     event.preventDefault()
@@ -163,7 +181,13 @@ export default function AdminAgents() {
       )}
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Agents</h3>
+        <div className="page-head">
+          <h3 style={{ margin: 0 }}>Agents</h3>
+          <label className="muted small" style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+            <input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />
+            Show network interfaces and other discovered items
+          </label>
+        </div>
         <div className="list">
           {!loading && agents.length === 0 && <div className="card">No agents discovered yet.</div>}
           {agents.map((agent) => {
@@ -190,21 +214,28 @@ export default function AdminAgents() {
                         <th>Resource</th>
                         <th>Type</th>
                         <th>Status</th>
+                        <th>Used by</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {agent.resources.length ? (
-                        agent.resources.map((resource) => (
-                          <tr key={resource.id}>
-                            <td>{resource.display_name}</td>
-                            <td>{resource.resource_type}</td>
-                            <td>{resource.available ? 'available' : 'unavailable'}</td>
-                          </tr>
-                        ))
+                      {agent.resources.some((resource) => showAll || HARDWARE_TYPES.includes(resource.resource_type)) ? (
+                        agent.resources
+                          .filter((resource) => showAll || HARDWARE_TYPES.includes(resource.resource_type))
+                          .map((resource) => (
+                            <tr key={resource.id}>
+                              <td>
+                                {resource.display_name}
+                                {resource.resource_key !== resource.display_name && <div className="muted small mono">{resource.resource_key}</div>}
+                              </td>
+                              <td>{resource.resource_type}</td>
+                              <td>{resource.available ? 'available' : 'unavailable'}</td>
+                              <td>{(usedBy[resource.id] || []).join(', ') || <span className="muted">not mapped</span>}</td>
+                            </tr>
+                          ))
                       ) : (
                         <tr>
-                          <td className="empty" colSpan={3}>
-                            No discovered resources
+                          <td className="empty" colSpan={4}>
+                            No serial, power or deploy resources reported{showAll ? '' : ' (tick "show" above to see everything discovered)'}
                           </td>
                         </tr>
                       )}
