@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -43,6 +43,12 @@ class Target(Base):
         default="available",
         nullable=False,
     )
+
+    # Why a target is in maintenance/retired (shown to users).
+    status_reason: Mapped[str | None] = mapped_column(String(500))
+
+    # Free-form labels for grouping and "reserve any board tagged X".
+    tags: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
 
     enabled: Mapped[bool] = mapped_column(
         Boolean,

@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     password_hash_iterations: int = 600_000
     refresh_token_hours: int = 168
 
+    # Background lab maintenance (expiry, warnings, waitlist, retention).
+    scheduler_enabled: bool = True
+    scheduler_interval_seconds: int = 30
+
     # Failed logins / password changes allowed per client IP + username within the window.
     auth_max_failures: int = 5
     auth_failure_window_seconds: int = 300

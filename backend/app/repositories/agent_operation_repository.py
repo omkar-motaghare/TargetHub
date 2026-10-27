@@ -26,6 +26,14 @@ class AgentOperationRepository:
         )
         return self.db.scalars(statement).first()
 
+    def snapshot(self, operation_id: str) -> AgentOperation | None:
+        """Fresh read that ends its transaction (pollers must not hold one open)."""
+        operation = self.get(operation_id)
+        if operation is not None:
+            self.db.expunge(operation)
+        self.db.commit()
+        return operation
+
     def save(self, entry: AgentOperation) -> AgentOperation:
         self.db.add(entry)
         self.db.commit()

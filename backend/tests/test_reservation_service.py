@@ -15,6 +15,9 @@ class FakeTarget:
     id: str
     enabled: bool = True
     status: str = "available"
+    name: str = "BOARD"
+    status_reason: str | None = None
+    tags: tuple = ()
 
 
 @dataclass
@@ -26,11 +29,25 @@ class FakeReservation:
     ends_at: datetime
     status: str = "active"
     released_at: datetime | None = None
+    released_by: str | None = None
+    warned_at: datetime | None = None
+
+
+class _FakeDb:
+    def rollback(self):
+        return None
 
 
 class FakeReservationRepo:
     def __init__(self):
         self.items: list[FakeReservation] = []
+        self.db = _FakeDb()
+
+    def count_active_for_user(self, user_id):
+        return sum(1 for r in self.items if r.user_id == user_id and r.status == "active")
+
+    def has_waiters(self, target_id):
+        return False
 
     def expire_due(self, now):
         return 0
@@ -44,8 +61,10 @@ class FakeReservationRepo:
     def lock_target(self, target_id):
         return None
 
-    def find_overlapping_active(self, target_id, starts_at, ends_at):
+    def find_overlapping_active(self, target_id, starts_at, ends_at, exclude_id=None):
         for r in self.items:
+            if r.id == exclude_id:
+                continue
             if r.target_id == target_id and r.status == "active":
                 if starts_at < r.ends_at and ends_at > r.starts_at:
                     return r

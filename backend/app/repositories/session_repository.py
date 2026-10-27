@@ -70,6 +70,20 @@ class SessionRepository:
             self._notify_agents(sessions)
         return len(sessions)
 
+    def extend_for_reservation(self, reservation_id: str, expires_at: datetime) -> int:
+        sessions = list(
+            self.db.scalars(
+                select(TargetSession).where(
+                    TargetSession.reservation_id == reservation_id, TargetSession.status == "active"
+                )
+            ).all()
+        )
+        for session in sessions:
+            session.expires_at = expires_at
+        if sessions:
+            self.db.commit()
+        return len(sessions)
+
     def close(self, session: TargetSession, now: datetime, status: str = "closed") -> TargetSession:
         """End one session and queue release of any Agent-held hardware."""
         session.status = status

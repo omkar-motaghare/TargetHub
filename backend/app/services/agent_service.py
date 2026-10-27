@@ -49,6 +49,22 @@ class AgentService:
             self.repository.save(agent)
         return agents
 
+    def mark_stale_offline(self) -> list[Agent]:
+        """Flip online Agents without a recent heartbeat to offline; returns those changed."""
+        cutoff = self._now() - timedelta(seconds=AGENT_OFFLINE_AFTER_SECONDS)
+        changed = []
+        for agent in self.repository.list():
+            if agent.status != "online" or not agent.last_seen_at:
+                continue
+            last_seen = agent.last_seen_at
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=UTC)
+            if last_seen < cutoff:
+                agent.status = "offline"
+                self.repository.save(agent)
+                changed.append(agent)
+        return changed
+
     def list_agents(self):
         return self._refresh_liveness(self.repository.list())
 

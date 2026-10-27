@@ -25,7 +25,7 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_DIR = REPO_ROOT / "backend"
 ALEMBIC_INI = BACKEND_DIR / "alembic.ini"
-EXPECTED_HEAD = "20261027_03"
+EXPECTED_HEAD = "20261027_04"
 
 
 def _alembic_head() -> str:

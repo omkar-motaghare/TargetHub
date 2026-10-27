@@ -1,3 +1,4 @@
+import asyncio
 import hmac
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -18,12 +19,18 @@ from app.core.metrics import metrics
 from app.core.middleware import RequestMiddleware
 from app.db.session import SessionLocal
 from app.services.auth_service import AuthService
+from app.services.scheduler import scheduler_loop
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     logger.info(f"Starting {settings.app_name} {settings.app_version} ({settings.environment})")
+    stop = asyncio.Event()
+    task = asyncio.create_task(scheduler_loop(_app, stop)) if settings.scheduler_enabled else None
     yield
+    stop.set()
+    if task is not None:
+        await task
     logger.info("Application shutdown complete")
 
 

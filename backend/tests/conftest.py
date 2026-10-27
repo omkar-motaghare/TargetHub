@@ -12,6 +12,8 @@ if backend_path not in sys.path:
 
 os.environ.setdefault("ENVIRONMENT", "development")
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
+# Tests drive maintenance explicitly via run_maintenance().
+os.environ.setdefault("SCHEDULER_ENABLED", "false")
 # Keep the suite fast; production uses the 600k default.
 os.environ.setdefault("PASSWORD_HASH_ITERATIONS", "20000")
 

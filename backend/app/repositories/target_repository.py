@@ -7,12 +7,15 @@ class TargetRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def list(self):
-        return (
-            self.db.query(Target)
-            .options(selectinload(Target.capabilities))
-            .all()
-        )
+    def list(self, tag: str | None = None, lab: str | None = None):
+        query = self.db.query(Target).options(selectinload(Target.capabilities))
+        if lab:
+            query = query.filter(Target.lab_name == lab)
+        targets = query.order_by(Target.name).all()
+        if tag:
+            # JSON containment differs per database; tags are small, filter in Python.
+            targets = [target for target in targets if tag in (target.tags or [])]
+        return targets
 
     def get(self, target_id: str):
         return (

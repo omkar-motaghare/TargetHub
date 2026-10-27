@@ -23,6 +23,7 @@ import contextlib
 import json
 from collections.abc import Iterator
 
+import anyio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -39,6 +40,7 @@ READ_WAIT_MS = 2000
 READ_SIZE = 65536
 MAX_INPUT_CHARS = 4096
 IDLE_BACKOFF_SECONDS = 0.15
+SHUTDOWN_GRACE_SECONDS = 20
 
 
 @contextlib.contextmanager
@@ -52,6 +54,26 @@ def _db_session(websocket: WebSocket) -> Iterator[Session]:
     finally:
         with contextlib.suppress(StopIteration):
             next(generator)
+
+
+async def _drain(pumps, db_calls: set, session_id: str) -> None:
+    """Stop the pumps and wait for in-flight DB work, even if being cancelled.
+
+    Pumps only await the socket or shielded DB tasks, so cancelling them is
+    safe; the DB tasks themselves must finish before their sessions close.
+    """
+    for task in pumps:
+        task.cancel()
+    pending = set(pumps) | {task for task in db_calls if not task.done()}
+    # Shield: when the handler itself is being cancelled (server shutdown, test
+    # client teardown) anyio re-delivers cancellation at every await.
+    with anyio.CancelScope(shield=True):
+        await asyncio.wait(pending, timeout=SHUTDOWN_GRACE_SECONDS)
+    for task in set(pumps) | db_calls:
+        if task.done() and not task.cancelled():
+            exc = task.exception()
+            if exc is not None and not isinstance(exc, (WebSocketDisconnect, RuntimeError, ConflictResource, ResourceNotFound)):
+                logger.warning(f"serial console error for session {session_id}: {exc}")
 
 
 async def _send(websocket: WebSocket, payload: dict) -> None:
@@ -92,12 +114,28 @@ async def serial_console(websocket: WebSocket, session_id: str) -> None:
         await _send(websocket, {"type": "ready", "session_id": session_id})
         metrics.inc("targethub_serial_ws_connections_total")
         stop = asyncio.Event()
+        db_calls: set[asyncio.Task] = set()
+
+        async def guarded(coro):
+            """Run DB-touching work in its own task so cancelling a pump cannot interrupt it."""
+            task = asyncio.create_task(coro)
+            db_calls.add(task)
+            task.add_done_callback(db_calls.discard)
+            return await asyncio.shield(task)
 
         async def pump_output() -> None:
+            try:
+                await _pump_output()
+            except (RuntimeError, WebSocketDisconnect):
+                stop.set()  # socket already closed
+
+        async def _pump_output() -> None:
             while not stop.is_set():
                 try:
-                    result = await reader.execute_async(
-                        session_id, username, "read", {"size": READ_SIZE, "wait_ms": READ_WAIT_MS}
+                    result = await guarded(
+                        reader.execute_async(
+                            session_id, username, "read", {"size": READ_SIZE, "wait_ms": READ_WAIT_MS}
+                        )
                     )
                 except (ConflictResource, ResourceNotFound) as exc:
                     message = str(exc)
@@ -125,7 +163,7 @@ async def serial_console(websocket: WebSocket, session_id: str) -> None:
             while not stop.is_set():
                 try:
                     raw = await websocket.receive_text()
-                except WebSocketDisconnect:
+                except (WebSocketDisconnect, RuntimeError):
                     stop.set()
                     return
                 try:
@@ -142,20 +180,18 @@ async def serial_console(websocket: WebSocket, session_id: str) -> None:
                 if not text:
                     continue
                 try:
-                    await writer.execute_async(session_id, username, "write", {"text": text})
+                    await guarded(writer.execute_async(session_id, username, "write", {"text": text}))
                 except (ConflictResource, ResourceNotFound) as exc:
                     await _send(websocket, {"type": "notice", "message": f"write failed: {exc}"})
 
-        tasks = [asyncio.create_task(pump_output()), asyncio.create_task(pump_input())]
+        output_task = asyncio.create_task(pump_output())
+        input_task = asyncio.create_task(pump_input())
         try:
-            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            for task in pending:
-                task.cancel()
-            for task in tasks:
-                with contextlib.suppress(asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
-                    await task
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning(f"serial console error for session {session_id}: {exc}")
+            await asyncio.wait({output_task, input_task}, return_when=asyncio.FIRST_COMPLETED)
         finally:
-            with contextlib.suppress(RuntimeError, WebSocketDisconnect):
+            stop.set()
+            # In-flight reads/writes must finish before the DB sessions close below;
+            # a snapshot of db_calls is taken because done-callbacks shrink the set.
+            await _drain((output_task, input_task), set(db_calls), session_id)
+            with contextlib.suppress(BaseException):
                 await websocket.close()

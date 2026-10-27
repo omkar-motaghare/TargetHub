@@ -365,10 +365,14 @@ class AgentOperationService:
             f"Agent did not complete {family} operation in time; Agent may be offline or disconnected"
         )
 
+    def _snapshot(self, operation_id: str):
+        snapshot = getattr(self.operation_repository, "snapshot", None)
+        return snapshot(operation_id) if snapshot else self.operation_repository.get(operation_id)
+
     def _await_result(self, operation_id: str, timeout: float, family: str) -> dict[str, Any]:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            outcome = self._outcome(self.operation_repository.get(operation_id), operation_id)
+            outcome = self._outcome(self._snapshot(operation_id), operation_id)
             if outcome is not None:
                 return outcome
             time.sleep(self.poll_interval_seconds)
@@ -379,7 +383,7 @@ class AgentOperationService:
         deadline = time.monotonic() + timeout
         async with signals.listen(operation_key(operation_id)) as listener:
             while True:
-                operation = await run_in_threadpool(self.operation_repository.get, operation_id)
+                operation = await run_in_threadpool(self._snapshot, operation_id)
                 outcome = self._outcome(operation, operation_id)
                 if outcome is not None:
                     return outcome

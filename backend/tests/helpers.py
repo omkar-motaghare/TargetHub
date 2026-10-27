@@ -11,12 +11,12 @@ from datetime import UTC, datetime, timedelta
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.api.dependencies import get_db
 from app.core.config import settings
 from app.db.models.user import User  # noqa: F401 - registers the users table
+from app.db.session import make_engine
 from app.main import app
 from app.models.base import Base
 
@@ -27,9 +27,7 @@ ADMIN = ("admin", "admin12345")
 @contextlib.contextmanager
 def api_client(tmp_path, monkeypatch) -> Iterator[tuple[TestClient, sessionmaker]]:
     monkeypatch.setattr(settings, "admin_bootstrap_token", BOOTSTRAP_TOKEN)
-    engine = create_engine(
-        f"sqlite:///{tmp_path / 'api.sqlite3'}", connect_args={"check_same_thread": False}
-    )
+    engine = make_engine(f"sqlite:///{tmp_path / 'api.sqlite3'}")
     Base.metadata.create_all(engine)
     session_local = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
