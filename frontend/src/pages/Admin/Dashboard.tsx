@@ -3,15 +3,17 @@ import React, { useState } from 'react'
 import AdminTargets from './Targets'
 import AdminAgents from './Agents'
 import AdminActivity from './Activity'
-import AdminConfig from './Config'
+import AdminSettings from './Settings'
 import AdminUsers from './Users'
+import AdminConfig from './Config'
 
 const tabs = [
   { key: 'targets', title: 'Targets', comp: <AdminTargets /> },
   { key: 'agents', title: 'Agents', comp: <AdminAgents /> },
   { key: 'activity', title: 'Activity', comp: <AdminActivity /> },
-  { key: 'config', title: 'Config', comp: <AdminConfig /> },
   { key: 'users', title: 'Users', comp: <AdminUsers /> },
+  { key: 'settings', title: 'Settings', comp: <AdminSettings /> },
+  { key: 'overview', title: 'Overview', comp: <AdminConfig /> },
 ]
 
 export default function AdminDashboard() {

@@ -1,17 +1,35 @@
-export type UserRole = 'admin' | 'user'
+export type UserRole = 'admin' | 'user' | 'viewer'
+export const ROLES: UserRole[] = ['admin', 'user', 'viewer']
 
 export type UserProfile = {
   id: number
   username: string
   roles: string[]
-  created_at: string
+  display_name?: string | null
+  email?: string | null
+  is_active?: boolean
+  last_login_at?: string | null
+  created_at: string | null
 }
 
-export type UserAdmin = {
-  id: number
-  username: string
-  roles: string[]
+export type UserAdmin = UserProfile
+
+export type TokenPair = {
+  access_token: string
+  refresh_token?: string | null
+  token_type: string
+  expires_in?: number | null
+}
+
+export type ApiToken = {
+  id: string
+  name: string
+  prefix: string
   created_at: string
+  expires_at: string | null
+  last_used_at: string | null
+  revoked_at: string | null
+  token?: string
 }
 
 export type CapabilityType =
@@ -25,18 +43,35 @@ export type CapabilityType =
   | 'reset'
   | 'deploy'
 
+export type CapabilityHosting = 'agent' | 'server'
+
 export type TargetCapability = {
   id: string
   target_id: string
   name: string
   capability_type: CapabilityType
-  agent_id: string | null
-  resource_id: string | null
-  provider_key: string | null
-  provider_config: Record<string, unknown>
   enabled: boolean
+  hosting: CapabilityHosting
+  /** agent | dd | http | simulated | serial | unconfigured | invalid */
+  mode: string
+  // Admin-only fields
+  agent_id?: string | null
+  resource_id?: string | null
+  provider_key?: string | null
+  provider_config?: Record<string, unknown>
   created_at: string
   updated_at: string
+}
+
+export type TargetState = 'available' | 'reserved' | 'maintenance' | 'retired' | 'disabled'
+
+export type Availability = {
+  state: TargetState
+  reason: string | null
+  reserved_by: string | null
+  reserved_until: string | null
+  next_reservation_at: string | null
+  next_reserved_by: string | null
 }
 
 export type Target = {
@@ -48,9 +83,12 @@ export type Target = {
   serial_number: string | null
   lab_name: string | null
   location: string | null
-  status: string
+  status: 'available' | 'maintenance' | 'retired'
+  status_reason: string | null
+  tags: string[]
   enabled: boolean
   capabilities: TargetCapability[]
+  availability?: Availability | null
   created_at: string
   updated_at: string
 }
@@ -62,9 +100,58 @@ export type Reservation = {
   starts_at: string
   ends_at: string
   status: string
+  note?: string | null
   released_at: string | null
+  released_by?: string | null
   created_at: string
   updated_at: string
+}
+
+export type WaitlistEntry = {
+  id: string
+  user_id: string
+  target_id: string | null
+  tag: string | null
+  duration_minutes: number
+  note: string | null
+  status: string
+  reservation_id: string | null
+  created_at: string
+  expires_at: string | null
+  fulfilled_at: string | null
+  position: number
+}
+
+export type AppNotification = {
+  id: string
+  kind: string
+  message: string
+  target_id: string | null
+  reservation_id: string | null
+  created_at: string
+  read_at: string | null
+}
+
+export type ReservationPolicy = {
+  max_duration_minutes: number
+  max_advance_days: number
+  max_active_reservations_per_user: number
+  default_duration_minutes: number
+  expiry_warning_minutes: number
+  allow_extend_when_waitlisted: boolean
+  waitlist_entry_ttl_hours: number
+  transcript_retention_days: number
+  audit_retention_days: number
+}
+
+export type Webhook = {
+  id?: string
+  name: string
+  url: string
+  format: 'slack' | 'teams' | 'generic'
+  events: string[]
+  enabled: boolean
+  secret?: string | null
 }
 
 export type Session = {
@@ -103,6 +190,8 @@ export type Agent = {
   status: string
   enabled: boolean
   last_seen_at: string | null
+  agent_version?: string | null
+  platform?: string | null
   credential_prefix: string | null
   credential_created_at: string | null
   credential_revoked_at: string | null
@@ -119,6 +208,7 @@ export type AgentEnrollment = {
   token: string | null
   targethub_url: string | null
   install_command: string | null
+  install_command_windows?: string | null
 }
 
 export type AuditEntry = {
@@ -146,7 +236,19 @@ export type ProviderResult = {
   capability_type: CapabilityType
   operation: string
   message: string
-  data: Record<string, unknown>
+  data: Record<string, unknown> | null
+  operation_id?: string
+  status?: string
+}
+
+export type OperationStatus = {
+  operation_id: string
+  operation: string
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled' | 'timed_out'
+  message: string | null
+  data: Record<string, unknown> | null
+  requested_at: string
+  completed_at: string | null
 }
 
 export type TargetCreateInput = {
@@ -158,7 +260,9 @@ export type TargetCreateInput = {
   lab_name?: string | null
   location?: string | null
   enabled?: boolean
-  status?: string
+  status?: Target['status']
+  status_reason?: string | null
+  tags?: string[]
   capabilities?: TargetCapabilityCreateInput[]
 }
 

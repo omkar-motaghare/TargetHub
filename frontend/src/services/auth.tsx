@@ -1,17 +1,20 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 
 import {
   clearAuthToken,
   getAuthToken,
   login as apiLogin,
+  logout as apiLogout,
   me,
-  setAuthToken,
+  setTokens,
   setUnauthorizedHandler,
 } from './api'
 import type { UserProfile, UserRole } from './types'
 
 export type AuthUser = {
   username: string
+  displayName: string
+  /** Highest role: admin > user > viewer */
   role: UserRole
   roles: string[]
 }
@@ -22,74 +25,55 @@ type AuthContextValue = {
   login: (username: string, password: string) => Promise<void>
   logout: () => void
   isAdmin: boolean
+  /** May reserve targets and operate hardware (admin or user, not viewer). */
+  canOperate: boolean
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-function profileToAuthUser(profile: UserProfile): AuthUser {
+export function profileToAuthUser(profile: UserProfile): AuthUser {
   const roles = profile.roles || []
-  return {
-    username: profile.username,
-    role: roles.includes('admin') ? 'admin' : 'user',
-    roles,
-  }
+  const role: UserRole = roles.includes('admin') ? 'admin' : roles.includes('user') ? 'user' : 'viewer'
+  return { username: profile.username, displayName: profile.display_name || profile.username, role, roles }
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [restoring, setRestoring] = useState<boolean>(true)
 
-  const logout = () => {
+  const logout = useCallback(() => {
     setUser(null)
-    localStorage.removeItem('th_user')
-    clearAuthToken()
-  }
+    void apiLogout()
+  }, [])
 
   useEffect(() => {
     setUnauthorizedHandler(() => {
-      logout()
+      setUser(null)
+      clearAuthToken()
     })
     return () => setUnauthorizedHandler(null)
   }, [])
 
   useEffect(() => {
-    const raw = localStorage.getItem('th_user')
-    if (raw) {
-      try {
-        setUser(JSON.parse(raw) as AuthUser)
-      } catch {
-        localStorage.removeItem('th_user')
-      }
-    }
-
-    const token = getAuthToken()
-    if (!token) {
+    if (!getAuthToken()) {
       setRestoring(false)
       return
     }
-
     ;(async () => {
       try {
-        const profile = await me()
-        const authUser = profileToAuthUser(profile)
-        setUser(authUser)
-        localStorage.setItem('th_user', JSON.stringify(authUser))
+        setUser(profileToAuthUser(await me()))
       } catch {
-        logout()
+        setUser(null)
       } finally {
         setRestoring(false)
       }
     })()
   }, [])
 
-  const login = async (username: string, password: string) => {
-    const token = await apiLogin(username, password)
-    setAuthToken(token)
-    const profile = await me()
-    const authUser = profileToAuthUser(profile)
-    setUser(authUser)
-    localStorage.setItem('th_user', JSON.stringify(authUser))
-  }
+  const login = useCallback(async (username: string, password: string) => {
+    setTokens(await apiLogin(username, password))
+    setUser(profileToAuthUser(await me()))
+  }, [])
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -98,8 +82,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       login,
       logout,
       isAdmin: user?.role === 'admin',
+      canOperate: user?.role === 'admin' || user?.role === 'user',
     }),
-    [user, restoring],
+    [user, restoring, login, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

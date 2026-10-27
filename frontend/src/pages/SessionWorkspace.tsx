@@ -1,160 +1,140 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import React, { useCallback, useEffect, useState } from 'react'
+import { Link, useParams } from 'react-router'
 
+import SerialConsole from '../components/SerialConsole'
 import {
   closeSession,
   executeSessionOperation,
+  getOperationStatus,
   getSession,
+  getTarget,
   listSessionOperations,
-  serialRead,
-  serialWrite,
+  serialLog,
+  submitSessionOperation,
 } from '../services/api'
-import { useAuth } from '../services/auth'
-import type { Session } from '../services/types'
-import { errorMessage, prettyDate } from '../utils/ui'
+import type { ProviderResult, Session, Target } from '../services/types'
+import { capabilityModeLabel, downloadText, errorMessage, prettyTime, relativeTime } from '../utils/ui'
 
-const SERIAL_POLL_MS = 1000
-const POWER_OPERATIONS = ['on', 'off', 'status', 'cycle', 'reset']
+const POWER_OPERATIONS: { op: string; label: string; confirm?: string }[] = [
+  { op: 'on', label: 'Power on' },
+  { op: 'off', label: 'Power off', confirm: 'Power the target off?' },
+  { op: 'cycle', label: 'Power cycle', confirm: 'Power-cycle the target? It will reboot.' },
+  { op: 'reset', label: 'Reset', confirm: 'Reset the target? It will reboot.' },
+  { op: 'status', label: 'Refresh status' },
+]
 
-function SerialTerminal({ session, onError }: { session: Session; onError: (message: string) => void }) {
-  const [output, setOutput] = useState('')
-  const [line, setLine] = useState('')
-  const [ready, setReady] = useState(false)
-  const screen = useRef<HTMLPreElement>(null)
+type LogLine = { at: string; text: string; ok: boolean }
 
-  useEffect(() => {
-    let cancelled = false
-    executeSessionOperation(session.id, 'open', {})
-      .then(() => {
-        if (!cancelled) setReady(true)
-      })
-      .catch((error) => {
-        if (!cancelled) onError(errorMessage(error))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [session.id, onError])
+function powerState(result: ProviderResult | null): string | null {
+  const data = result?.data || {}
+  const value = (data.power ?? data.state) as string | undefined
+  return typeof value === 'string' ? value : null
+}
 
-  useEffect(() => {
-    if (!ready) return
-    let cancelled = false
-    const timer = window.setInterval(() => {
-      serialRead(session.id)
-        .then((result) => {
-          const text = result.data.data_text
-          if (!cancelled && typeof text === 'string' && text) setOutput((current) => current + text)
-        })
-        .catch((error) => {
-          if (!cancelled) onError(errorMessage(error))
-        })
-    }, SERIAL_POLL_MS)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
-  }, [ready, session.id, onError])
+function PowerPanel({ sessionId, operations, log }: { sessionId: string; operations: string[]; log: (line: LogLine) => void }) {
+  const [state, setState] = useState<string | null>(null)
+  const [confirmed, setConfirmed] = useState<boolean | null>(null)
+  const [running, setRunning] = useState<string | null>(null)
+
+  const run = useCallback(
+    async (operation: string, confirmText?: string) => {
+      if (confirmText && !window.confirm(confirmText)) return
+      setRunning(operation)
+      try {
+        const result = await executeSessionOperation(sessionId, operation)
+        setState(powerState(result) ?? state)
+        const data = result.data || {}
+        setConfirmed(typeof data.confirmed === 'boolean' ? (data.confirmed as boolean) : null)
+        log({ at: new Date().toISOString(), text: `${operation}: ${result.message}`, ok: true })
+      } catch (error) {
+        log({ at: new Date().toISOString(), text: `${operation}: ${errorMessage(error)}`, ok: false })
+      } finally {
+        setRunning(null)
+      }
+    },
+    [sessionId, log, state],
+  )
 
   useEffect(() => {
-    if (screen.current) screen.current.scrollTop = screen.current.scrollHeight
-  }, [output])
+    if (operations.includes('status')) void run('status')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [operations.join(',')])
 
-  async function send(event: React.FormEvent): Promise<void> {
+  return (
+    <section className="card">
+      <div className="page-head">
+        <h3 style={{ margin: 0 }}>Power</h3>
+        <span className={`power-state ${state || 'unknown'}`} aria-label="power state">
+          {state ? state.toUpperCase() : 'UNKNOWN'}
+          {confirmed === false && ' (unconfirmed)'}
+        </span>
+      </div>
+      <div className="toolbar">
+        {POWER_OPERATIONS.filter((item) => operations.includes(item.op)).map((item) => (
+          <button key={item.op} type="button" disabled={running !== null}
+            className={item.op === 'on' || item.op === 'status' ? 'button' : 'button secondary'}
+            onClick={() => void run(item.op, item.confirm)}>
+            {running === item.op ? `${item.label}…` : item.label}
+          </button>
+        ))}
+      </div>
+      {running && <p className="muted small">Waiting for the power system to confirm…</p>}
+    </section>
+  )
+}
+
+function DeployPanel({ sessionId, log }: { sessionId: string; log: (line: LogLine) => void }) {
+  const [url, setUrl] = useState('')
+  const [sha256, setSha256] = useState('')
+  const [status, setStatus] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  async function deploy(event: React.FormEvent): Promise<void> {
     event.preventDefault()
+    setBusy(true)
+    setStatus('queued')
     try {
-      await serialWrite(session.id, `${line}\n`)
-      setLine('')
+      const queued = await submitSessionOperation(sessionId, 'deploy', { url, sha256 })
+      if (!queued.operation_id) {
+        log({ at: new Date().toISOString(), text: `deploy: ${queued.message}`, ok: true })
+        setStatus('completed')
+        return
+      }
+      for (;;) {
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+        const current = await getOperationStatus(sessionId, queued.operation_id)
+        setStatus(current.status)
+        if (['completed', 'failed', 'cancelled', 'timed_out'].includes(current.status)) {
+          const output = (current.data?.output as string | undefined) || ''
+          log({
+            at: new Date().toISOString(),
+            text: `deploy ${current.status}: ${current.message || ''}${output ? `\n${output}` : ''}`,
+            ok: current.status === 'completed',
+          })
+          break
+        }
+      }
     } catch (error) {
-      onError(errorMessage(error))
+      setStatus('failed')
+      log({ at: new Date().toISOString(), text: `deploy: ${errorMessage(error)}`, ok: false })
+    } finally {
+      setBusy(false)
     }
   }
 
   return (
     <section className="card">
-      <h3>Serial terminal</h3>
-      <pre className="log-console" ref={screen} aria-label="serial output">
-        {output || (ready ? 'Waiting for device output...' : 'Opening serial port...')}
-      </pre>
-      <form onSubmit={(event) => void send(event)} style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-        <input
-          aria-label="serial input"
-          value={line}
-          onChange={(event) => setLine(event.target.value)}
-          disabled={!ready}
-          style={{ flex: 1 }}
-        />
-        <button className="button" type="submit" disabled={!ready}>
-          Send
-        </button>
-        <button className="button ghost" type="button" onClick={() => setOutput('')}>
-          Clear
-        </button>
-      </form>
-    </section>
-  )
-}
-
-function PowerPanel({
-  operations,
-  run,
-  busy,
-}: {
-  operations: string[]
-  run: (operation: string) => Promise<void>
-  busy: boolean
-}) {
-  return (
-    <section className="card">
-      <h3>Power control</h3>
-      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-        {POWER_OPERATIONS.filter((operation) => operations.includes(operation)).map((operation) => (
-          <button
-            key={operation}
-            className={operation === 'off' || operation === 'cycle' || operation === 'reset' ? 'button secondary' : 'button'}
-            onClick={() => void run(operation)}
-            disabled={busy}
-            type="button"
-          >
-            {operation}
-          </button>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-function DeployPanel({
-  run,
-  busy,
-}: {
-  run: (operation: string, params: Record<string, unknown>) => Promise<void>
-  busy: boolean
-}) {
-  const [url, setUrl] = useState('')
-  const [sha256, setSha256] = useState('')
-
-  return (
-    <section className="card">
-      <h3>Deploy artifact</h3>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault()
-          void run('deploy', { url, sha256 })
-        }}
-        style={{ display: 'grid', gap: '0.5rem' }}
-      >
-        <input aria-label="artifact url" placeholder="https://host/firmware.bin" value={url} onChange={(e) => setUrl(e.target.value)} required />
-        <input
-          aria-label="artifact sha256"
-          placeholder="sha256 (64 hex chars)"
-          value={sha256}
-          onChange={(e) => setSha256(e.target.value)}
-          pattern="[0-9a-fA-F]{64}"
-          required
-        />
-        <button className="button" type="submit" disabled={busy}>
-          Deploy
-        </button>
+      <h3 style={{ marginTop: 0 }}>Deploy firmware</h3>
+      <p className="muted small">The Agent downloads the artifact, verifies its SHA-256 and runs the flash command configured on the Agent host.</p>
+      <form onSubmit={(event) => void deploy(event)} className="stack">
+        <input className="input" aria-label="artifact url" placeholder="https://artifacts.example.com/firmware.bin"
+          value={url} onChange={(event) => setUrl(event.target.value)} required />
+        <input className="input mono" aria-label="artifact sha256" placeholder="sha256 (64 hex characters)" value={sha256}
+          onChange={(event) => setSha256(event.target.value.trim())} pattern="[0-9a-fA-F]{64}" required />
+        <div className="toolbar">
+          <button className="button" type="submit" disabled={busy}>{busy ? 'Deploying…' : 'Deploy'}</button>
+          {status && <span className={`status-pill ${status}`}>{status.replace('_', ' ')}</span>}
+        </div>
       </form>
     </section>
   )
@@ -162,54 +142,36 @@ function DeployPanel({
 
 export default function SessionWorkspace() {
   const { sessionId = '' } = useParams()
-  const auth = useAuth()
   const [session, setSession] = useState<Session | null>(null)
+  const [target, setTarget] = useState<Target | null>(null)
   const [operations, setOperations] = useState<string[]>([])
-  const [log, setLog] = useState<string[]>([])
+  const [log, setLog] = useState<LogLine[]>([])
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const showError = useCallback((text: string) => setMessage(text), [])
+  const [, setTick] = useState(0)
+  const addLog = useCallback((line: LogLine) => setLog((current) => [...current.slice(-199), line]), [])
 
-  useEffect(() => {
-    let cancelled = false
-    async function load(): Promise<void> {
-      try {
-        const loaded = await getSession(sessionId)
-        if (cancelled) return
-        setSession(loaded)
-        if (loaded.status === 'active') {
-          const available = await listSessionOperations(sessionId)
-          if (!cancelled) setOperations(available.operations)
-        }
-      } catch (error) {
-        if (!cancelled) setMessage(errorMessage(error))
-      }
-    }
-    void load()
-    return () => {
-      cancelled = true
+  const load = useCallback(async () => {
+    try {
+      const loaded = await getSession(sessionId)
+      setSession(loaded)
+      getTarget(loaded.target_id).then(setTarget).catch(() => undefined)
+      if (loaded.status === 'active') setOperations((await listSessionOperations(sessionId)).operations)
+    } catch (error) {
+      setMessage(errorMessage(error))
     }
   }, [sessionId])
 
-  async function run(operation: string, params: Record<string, unknown> = {}): Promise<void> {
-    setBusy(true)
-    setMessage(null)
-    try {
-      const result = await executeSessionOperation(sessionId, operation, params)
-      const detail = Object.keys(result.data).length ? ` ${JSON.stringify(result.data)}` : ''
-      setLog((current) => [...current, `[${new Date().toLocaleTimeString()}] ${operation}: ${result.message}${detail}`])
-    } catch (error) {
-      setMessage(errorMessage(error))
-    } finally {
-      setBusy(false)
-    }
-  }
+  useEffect(() => {
+    void load()
+    const timer = window.setInterval(() => setTick((value) => value + 1), 30_000)
+    return () => window.clearInterval(timer)
+  }, [load])
 
   async function handleClose(): Promise<void> {
-    if (!auth.user) return
     setBusy(true)
     try {
-      setSession(await closeSession(sessionId, auth.user.username))
+      setSession(await closeSession(sessionId))
       setOperations([])
     } catch (error) {
       setMessage(errorMessage(error))
@@ -218,47 +180,78 @@ export default function SessionWorkspace() {
     }
   }
 
+  async function runGeneric(operation: string): Promise<void> {
+    setBusy(true)
+    try {
+      const result = await executeSessionOperation(sessionId, operation)
+      const detail = result.data && Object.keys(result.data).length ? ` ${JSON.stringify(result.data)}` : ''
+      addLog({ at: new Date().toISOString(), text: `${operation}: ${result.message}${detail}`, ok: true })
+    } catch (error) {
+      addLog({ at: new Date().toISOString(), text: `${operation}: ${errorMessage(error)}`, ok: false })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onConsoleEnded = useCallback(() => void load(), [load])
+
   if (!session) {
-    return message ? <div className="feedback error">{message}</div> : <div className="card">Loading session...</div>
+    return message ? <div className="feedback error">{message}</div> : <div className="card">Loading session…</div>
   }
 
   const active = session.status === 'active'
+  const capability = target?.capabilities.find((item) => item.id === session.capability_id)
+  const kind = session.capability_type
 
   return (
     <div>
       <div className="page-head">
         <div>
           <h2 className="page-title">
-            {session.capability_type} session
+            {target?.name || 'Target'} · {capability?.name || kind}
           </h2>
           <p className="muted">
-            Target {session.target_id} | Status: {session.status} | Expires: {prettyDate(session.expires_at)}
+            {capability ? `${capabilityModeLabel(capability)} · ` : ''}
+            {active ? `Session ends ${prettyTime(session.expires_at)} (${relativeTime(session.expires_at)})` : `Session ${session.status}`}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <Link to="/sessions" className="button ghost">
-            Back
-          </Link>
+        <div className="toolbar">
+          <Link to="/my" className="button ghost">Back</Link>
           {active && (
             <button className="button secondary" onClick={() => void handleClose()} disabled={busy} type="button">
-              Close Session
+              Close session
             </button>
           )}
         </div>
       </div>
 
       {message && <div className="feedback error">{message}</div>}
-      {!active && <div className="card">This session is {session.status}; operations are unavailable.</div>}
+      {capability?.mode === 'simulated' && (
+        <div className="feedback info">This capability is simulated: no real hardware is being controlled.</div>
+      )}
+      {!active && (
+        <div className="card">
+          This session is {session.status}. Open a new one from My reservations.
+          {kind === 'serial' && (
+            <div style={{ marginTop: '0.6rem' }}>
+              <button className="button ghost" type="button"
+                onClick={() => void serialLog(session.id, true).then((text) => downloadText(`targethub-serial-${session.id.slice(0, 8)}.log`, text)).catch((error) => setMessage(errorMessage(error)))}>
+                Download console log
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
-      {active && session.capability_type === 'serial' && <SerialTerminal session={session} onError={showError} />}
-      {active && session.capability_type === 'power' && <PowerPanel operations={operations} run={run} busy={busy} />}
-      {active && session.capability_type === 'deploy' && <DeployPanel run={run} busy={busy} />}
-      {active && !['serial', 'power', 'deploy'].includes(session.capability_type) && (
+      {active && kind === 'serial' && <SerialConsole sessionId={session.id} onEnded={onConsoleEnded} />}
+      {active && (kind === 'power' || kind === 'reset') && <PowerPanel sessionId={session.id} operations={operations} log={addLog} />}
+      {active && kind === 'deploy' && <DeployPanel sessionId={session.id} log={addLog} />}
+      {active && !['serial', 'power', 'reset', 'deploy'].includes(kind) && (
         <section className="card">
-          <h3>Operations</h3>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <h3 style={{ marginTop: 0 }}>Operations</h3>
+          <div className="toolbar">
             {operations.map((operation) => (
-              <button key={operation} className="button" onClick={() => void run(operation)} disabled={busy} type="button">
+              <button key={operation} className="button" onClick={() => void runGeneric(operation)} disabled={busy} type="button">
                 {operation}
               </button>
             ))}
@@ -266,10 +259,16 @@ export default function SessionWorkspace() {
         </section>
       )}
 
-      <section className="card" style={{ marginTop: '0.8rem' }}>
-        <h3>Operation log</h3>
-        <pre className="log-console">{log.length ? log.join('\n') : 'No operations yet.'}</pre>
-      </section>
+      {kind !== 'serial' && (
+        <section className="card" style={{ marginTop: '0.8rem' }}>
+          <h3 style={{ marginTop: 0 }}>Activity</h3>
+          <pre className="log-console" aria-label="operation log">
+            {log.length
+              ? log.map((line) => `${line.ok ? '✓' : '✗'} [${new Date(line.at).toLocaleTimeString()}] ${line.text}`).join('\n')
+              : 'No operations yet.'}
+          </pre>
+        </section>
+      )}
     </div>
   )
 }

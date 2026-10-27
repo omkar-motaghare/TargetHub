@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 
+import StateBadge from '../../components/StateBadge'
 import {
   createCapability,
   createTarget,
@@ -20,16 +21,24 @@ import type {
   TargetCapability,
   TargetCapabilityCreateInput,
 } from '../../services/types'
-import { classifyTargetStatus, errorMessage, prettyDate } from '../../utils/ui'
+import { capabilityModeLabel, errorMessage, prettyTime, targetState } from '../../utils/ui'
+
+/** Where a capability executes. */
+type Backend = 'agent' | 'dd' | 'http' | 'simulated' | 'custom'
 
 type EditableCapability = {
   id?: string
   name: string
   capability_type: CapabilityType
-  provider_key: string
   enabled: boolean
+  backend: Backend
   agent_id: string | null
   resource_id: string | null
+  provider_key: string
+  /** Every provider_config key, including ones this form does not edit. */
+  config: Record<string, unknown>
+  /** Raw JSON for the "custom" backend. */
+  json: string
 }
 
 type TargetForm = {
@@ -41,69 +50,273 @@ type TargetForm = {
   serial_number: string
   lab_name: string
   location: string
+  tags: string
+  status: Target['status']
+  status_reason: string
   enabled: boolean
   capabilities: EditableCapability[]
 }
 
-const CAPABILITY_TYPES: CapabilityType[] = [
-  'serial',
-  'network',
-  'ssh',
-  'telnet',
-  'ftp',
-  'jlink',
-  'power',
-  'reset',
-  'deploy',
+const CAPABILITY_TYPES: { value: CapabilityType; label: string }[] = [
+  { value: 'serial', label: 'Serial console' },
+  { value: 'power', label: 'Power' },
+  { value: 'reset', label: 'Reset' },
+  { value: 'deploy', label: 'Firmware deploy' },
+  { value: 'jlink', label: 'Debugger (J-Link bridge)' },
+  { value: 'network', label: 'Network bridge' },
+  { value: 'ssh', label: 'SSH bridge' },
+  { value: 'telnet', label: 'Telnet bridge' },
+  { value: 'ftp', label: 'FTP bridge' },
 ]
 
-function newCapability(): EditableCapability {
+const BACKENDS: Record<CapabilityType, Backend[]> = {
+  serial: ['agent', 'simulated'],
+  power: ['agent', 'dd', 'http', 'simulated'],
+  reset: ['agent', 'dd', 'http', 'simulated'],
+  deploy: ['agent', 'custom', 'simulated'],
+  jlink: ['custom', 'simulated'],
+  network: ['custom', 'simulated'],
+  ssh: ['custom', 'simulated'],
+  telnet: ['custom', 'simulated'],
+  ftp: ['custom', 'simulated'],
+}
+
+const BACKEND_LABELS: Record<Backend, string> = {
+  agent: 'Agent hardware',
+  dd: 'DD power system (server)',
+  http: 'HTTP power controller (server)',
+  simulated: 'Simulated (demo only)',
+  custom: 'HTTP bridge (server, JSON config)',
+}
+
+const RESOURCE_TYPES: Record<string, string[]> = {
+  serial: ['serial'],
+  power: ['power'],
+  reset: ['power', 'reset'],
+  deploy: ['deploy'],
+}
+
+function inferBackend(capability: TargetCapability): Backend {
+  const config = capability.provider_config || {}
+  if (capability.agent_id && capability.resource_id) return 'agent'
+  if (config.driver === 'dd') return 'dd'
+  if (config.driver === 'http' || config.mode === 'real') {
+    return capability.capability_type === 'power' || capability.capability_type === 'reset' ? 'http' : 'custom'
+  }
+  if (config.driver === 'simulated' || config.mode === 'simulated' || Object.keys(config).length === 0) return 'simulated'
+  return 'custom'
+}
+
+function newCapability(type: CapabilityType = 'serial'): EditableCapability {
   return {
-    name: '',
-    capability_type: 'serial',
-    provider_key: 'serial-demo',
+    name: type === 'serial' ? 'Console' : type === 'power' ? 'Power' : '',
+    capability_type: type,
     enabled: true,
+    backend: BACKENDS[type][0],
     agent_id: null,
     resource_id: null,
+    provider_key: '',
+    config: type === 'power' ? { cycle_delay_seconds: 3, confirm_timeout_seconds: 10 } : {},
+    json: '{}',
+  }
+}
+
+function toEditable(capability: TargetCapability): EditableCapability {
+  const config = { ...(capability.provider_config || {}) }
+  return {
+    id: capability.id,
+    name: capability.name,
+    capability_type: capability.capability_type,
+    enabled: capability.enabled,
+    backend: inferBackend(capability),
+    agent_id: capability.agent_id || null,
+    resource_id: capability.resource_id || null,
+    provider_key: capability.provider_key || '',
+    config,
+    json: JSON.stringify(config, null, 2),
   }
 }
 
 function blankForm(): TargetForm {
   return {
-    name: '',
-    description: '',
-    vendor: '',
-    board_model: '',
-    serial_number: '',
-    lab_name: '',
-    location: '',
-    enabled: true,
-    capabilities: [newCapability()],
+    name: '', description: '', vendor: '', board_model: '', serial_number: '', lab_name: '', location: '',
+    tags: '', status: 'available', status_reason: '', enabled: true, capabilities: [],
   }
 }
 
-function toEditableCapability(capability: TargetCapability): EditableCapability {
-  return {
-    id: capability.id,
-    name: capability.name,
-    capability_type: capability.capability_type,
-    provider_key: capability.provider_key || `${capability.capability_type}-demo`,
-    enabled: capability.enabled,
-    agent_id: capability.agent_id,
-    resource_id: capability.resource_id,
+export function capabilityPayload(row: EditableCapability): TargetCapabilityCreateInput {
+  const base = {
+    name: row.name.trim(),
+    capability_type: row.capability_type,
+    enabled: row.enabled,
+    provider_key: row.provider_key.trim() || null,
   }
+  if (row.backend === 'agent') {
+    const { driver: _driver, mode: _mode, ...rest } = row.config
+    return { ...base, agent_id: row.agent_id, resource_id: row.resource_id, provider_config: rest }
+  }
+  if (row.backend === 'custom') {
+    let parsed: Record<string, unknown>
+    try {
+      parsed = JSON.parse(row.json || '{}')
+    } catch {
+      throw new Error(`Capability "${row.name}": provider configuration is not valid JSON`)
+    }
+    return { ...base, agent_id: null, resource_id: null, provider_config: parsed }
+  }
+  if (row.backend === 'simulated') {
+    return { ...base, agent_id: null, resource_id: null, provider_config: { ...row.config, driver: 'simulated', mode: 'simulated' } }
+  }
+  const { mode: _mode, ...rest } = row.config
+  const config: Record<string, unknown> = { ...rest, driver: row.backend }
+  for (const key of ['node_id', 'endpoint', 'cycle_delay_seconds', 'confirm_timeout_seconds', 'timeout_seconds']) {
+    if (config[key] === '' || config[key] === undefined) delete config[key]
+    else if (typeof config[key] === 'string') config[key] = Number(config[key])
+  }
+  if (!config.api_key_env) delete config.api_key_env
+  return { ...base, agent_id: null, resource_id: null, provider_config: config }
 }
 
-function capabilityPayload(capability: EditableCapability): TargetCapabilityCreateInput {
-  return {
-    name: capability.name.trim(),
-    capability_type: capability.capability_type,
-    provider_key: capability.provider_key.trim() || `${capability.capability_type}-demo`,
-    enabled: capability.enabled,
-    agent_id: capability.agent_id || null,
-    resource_id: capability.resource_id || null,
-    provider_config: {},
-  }
+function Field({ label, children, wide }: { label: string; children: React.ReactNode; wide?: boolean }) {
+  return (
+    <label className={wide ? 'wide' : undefined}>
+      <span className="muted">{label}</span>
+      {children}
+    </label>
+  )
+}
+
+function CapabilityEditor({
+  row,
+  agents,
+  onChange,
+  onRemove,
+}: {
+  row: EditableCapability
+  agents: Agent[]
+  onChange: (patch: Partial<EditableCapability>) => void
+  onRemove: () => void
+}) {
+  const agent = agents.find((item) => item.id === row.agent_id)
+  const wanted = RESOURCE_TYPES[row.capability_type] || []
+  const resources = (agent?.resources || []).filter(
+    (resource) => resource.available && (!wanted.length || wanted.includes(resource.resource_type)),
+  )
+  const setConfig = (key: string, value: unknown) => onChange({ config: { ...row.config, [key]: value } })
+  const text = (key: string) => String(row.config[key] ?? '')
+
+  return (
+    <div className="capability-row">
+      <Field label="Name">
+        <input className="input" value={row.name} placeholder="Console" onChange={(e) => onChange({ name: e.target.value })} />
+      </Field>
+      <Field label="Type">
+        <select className="select" value={row.capability_type}
+          onChange={(e) => {
+            const type = e.target.value as CapabilityType
+            onChange({ capability_type: type, backend: BACKENDS[type][0], agent_id: null, resource_id: null })
+          }}>
+          {CAPABILITY_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+        </select>
+      </Field>
+      <Field label="Runs on">
+        <select className="select" value={row.backend} onChange={(e) => onChange({ backend: e.target.value as Backend })}>
+          {BACKENDS[row.capability_type].map((backend) => <option key={backend} value={backend}>{BACKEND_LABELS[backend]}</option>)}
+        </select>
+      </Field>
+      <Field label="Enabled">
+        <select className="select" value={row.enabled ? 'yes' : 'no'} onChange={(e) => onChange({ enabled: e.target.value === 'yes' })}>
+          <option value="yes">Yes</option>
+          <option value="no">No</option>
+        </select>
+      </Field>
+
+      {row.backend === 'agent' && (
+        <>
+          <Field label="Agent">
+            <select className="select" value={row.agent_id || ''} onChange={(e) => onChange({ agent_id: e.target.value || null, resource_id: null })}>
+              <option value="">Select an Agent…</option>
+              {agents.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.status})</option>)}
+            </select>
+          </Field>
+          <Field label="Hardware resource" wide>
+            <select className="select" value={row.resource_id || ''} onChange={(e) => onChange({ resource_id: e.target.value || null })}>
+              <option value="">{agent ? (resources.length ? 'Select a discovered resource…' : 'No matching resources reported by this Agent') : 'Select an Agent first'}</option>
+              {resources.map((resource) => (
+                <option key={resource.id} value={resource.id}>
+                  {resource.display_name} ({resource.resource_type}){resource.metadata?.simulated ? ' · simulated' : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </>
+      )}
+
+      {row.backend === 'dd' && (
+        <>
+          <Field label="DD server URL" wide>
+            <input className="input" placeholder="http://dd-server:5003" value={text('base_url')} onChange={(e) => setConfig('base_url', e.target.value)} />
+          </Field>
+          <Field label="Hub MAC">
+            <input className="input mono" placeholder="AA:BB:CC:DD:EE:FF" value={text('hub_mac')} onChange={(e) => setConfig('hub_mac', e.target.value)} />
+          </Field>
+          <Field label="Node ID">
+            <input className="input" type="number" min={0} value={text('node_id')} onChange={(e) => setConfig('node_id', e.target.value)} />
+          </Field>
+          <Field label="Endpoint">
+            <input className="input" type="number" min={0} value={text('endpoint')} onChange={(e) => setConfig('endpoint', e.target.value)} />
+          </Field>
+          <Field label="API key env var (on the server)">
+            <input className="input mono" placeholder="TARGETHUB_DD_API_KEY" value={text('api_key_env')} onChange={(e) => setConfig('api_key_env', e.target.value)} />
+          </Field>
+          <Field label="Cycle off-time (s)">
+            <input className="input" type="number" min={0.5} step={0.5} value={text('cycle_delay_seconds')} onChange={(e) => setConfig('cycle_delay_seconds', e.target.value)} />
+          </Field>
+          <Field label="Confirm timeout (s)">
+            <input className="input" type="number" min={0} value={text('confirm_timeout_seconds')} onChange={(e) => setConfig('confirm_timeout_seconds', e.target.value)} />
+          </Field>
+        </>
+      )}
+
+      {row.backend === 'http' && (
+        <>
+          <Field label="Controller URL" wide>
+            <input className="input" placeholder="https://pdu.lab.local" value={text('controller_url')} onChange={(e) => setConfig('controller_url', e.target.value)} />
+          </Field>
+          <Field label="Outlet ID">
+            <input className="input" value={text('outlet_id')} onChange={(e) => setConfig('outlet_id', e.target.value)} />
+          </Field>
+          <Field label="Auth">
+            <select className="select" value={text('auth_type') || 'none'} onChange={(e) => setConfig('auth_type', e.target.value)}>
+              <option value="none">None</option>
+              <option value="bearer">Bearer token (env var)</option>
+            </select>
+          </Field>
+          {row.config.auth_type === 'bearer' && (
+            <Field label="Token env var">
+              <input className="input mono" value={text('bearer_token_env')} onChange={(e) => setConfig('bearer_token_env', e.target.value)} />
+            </Field>
+          )}
+        </>
+      )}
+
+      {row.backend === 'custom' && (
+        <Field label='Provider configuration (JSON, e.g. {"mode": "real", "controller_url": "…"})' wide>
+          <textarea className="textarea mono" rows={4} value={row.json} onChange={(e) => onChange({ json: e.target.value })} />
+        </Field>
+      )}
+
+      {row.backend === 'simulated' && (
+        <div className="wide inline-note warn">
+          Simulated capabilities control no hardware. The server refuses them unless ALLOW_SIMULATED_PROVIDERS=true.
+        </div>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'end' }}>
+        <button className="button danger" type="button" onClick={onRemove}>Remove</button>
+      </div>
+    </div>
+  )
 }
 
 export default function AdminTargets() {
@@ -113,34 +326,33 @@ export default function AdminTargets() {
   const [form, setForm] = useState<TargetForm>(blankForm)
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [message, setMessage] = useState<string | null>(null)
-
-  useEffect(() => {
-    void refresh()
-  }, [])
+  const [message, setMessage] = useState<{ kind: 'error' | 'info'; text: string } | null>(null)
 
   async function refresh(): Promise<void> {
     setLoading(true)
-    setMessage(null)
     try {
       const [targetRows, reservationRows, agentRows] = await Promise.all([
         listTargets(),
-        listReservations(),
+        listReservations({ status: 'active' }),
         listAgents(),
       ])
       setTargets(targetRows)
       setReservations(reservationRows)
       setAgents(agentRows)
     } catch (error) {
-      setMessage(errorMessage(error))
+      setMessage({ kind: 'error', text: errorMessage(error) })
     } finally {
       setLoading(false)
     }
   }
 
+  useEffect(() => {
+    void refresh()
+  }, [])
+
   const agentsById = useMemo(() => Object.fromEntries(agents.map((agent) => [agent.id, agent])), [agents])
 
-  function editTarget(target: Target): void {
+  function edit(target: Target): void {
     setForm({
       id: target.id,
       name: target.name,
@@ -150,72 +362,37 @@ export default function AdminTargets() {
       serial_number: target.serial_number || '',
       lab_name: target.lab_name || '',
       location: target.location || '',
+      tags: (target.tags || []).join(', '),
+      status: target.status,
+      status_reason: target.status_reason || '',
       enabled: target.enabled,
-      capabilities: (target.capabilities || []).map(toEditableCapability),
+      capabilities: (target.capabilities || []).map(toEditable),
     })
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  function resetForm(): void {
-    setForm(blankForm())
-  }
+  const setField = <K extends keyof TargetForm>(key: K, value: TargetForm[K]) => setForm((current) => ({ ...current, [key]: value }))
 
-  function setField<K extends keyof TargetForm>(key: K, value: TargetForm[K]): void {
-    setForm((current) => ({ ...current, [key]: value }))
-  }
-
-  function updateCapabilityRow(index: number, patch: Partial<EditableCapability>): void {
+  function patchCapability(index: number, patch: Partial<EditableCapability>): void {
     setForm((current) => {
       const rows = [...current.capabilities]
       rows[index] = { ...rows[index], ...patch }
-      if (patch.capability_type && rows[index].provider_key.endsWith('-demo')) {
-        rows[index].provider_key = `${patch.capability_type}-demo`
-      }
-      if (patch.agent_id !== undefined) {
-        rows[index].resource_id = null
-      }
       return { ...current, capabilities: rows }
     })
   }
 
-  function addCapabilityRow(): void {
-    setForm((current) => ({ ...current, capabilities: [...current.capabilities, newCapability()] }))
-  }
-
-  function removeCapabilityRow(index: number): void {
-    setForm((current) => {
-      const rows = [...current.capabilities]
-      rows.splice(index, 1)
-      return { ...current, capabilities: rows.length ? rows : [newCapability()] }
-    })
-  }
-
-  function resourcesFor(agentId: string | null): { id: string; label: string }[] {
-    if (!agentId) return []
-    const agent = agentsById[agentId]
-    if (!agent) return []
-    return (agent.resources || [])
-      .filter((resource) => resource.available)
-      .map((resource) => ({ id: resource.id, label: `${resource.display_name} (${resource.resource_type})` }))
-  }
-
-  async function saveTarget(): Promise<void> {
+  async function save(): Promise<void> {
     if (!form.name.trim()) {
-      setMessage('Target name is required.')
+      setMessage({ kind: 'error', text: 'Target name is required.' })
       return
     }
-
-    const cleanCapabilities = form.capabilities
-      .map((capability) => ({ ...capability, name: capability.name.trim() }))
-      .filter((capability) => capability.name.length > 0)
-
-    if (!cleanCapabilities.length) {
-      setMessage('At least one named capability is required.')
-      return
-    }
-
     setBusy(true)
     setMessage(null)
     try {
+      const rows = form.capabilities.filter((row) => row.name.trim())
+      const payloads = rows.map((row) => ({ row, payload: capabilityPayload(row) }))
+      const missingResource = payloads.find(({ row }) => row.backend === 'agent' && (!row.agent_id || !row.resource_id))
+      if (missingResource) throw new Error(`Capability "${missingResource.row.name}": select an Agent and a hardware resource`)
       const targetPayload = {
         name: form.name.trim(),
         description: form.description.trim() || null,
@@ -224,79 +401,58 @@ export default function AdminTargets() {
         serial_number: form.serial_number.trim() || null,
         lab_name: form.lab_name.trim() || null,
         location: form.location.trim() || null,
+        tags: form.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
+        status: form.status,
+        status_reason: form.status === 'available' ? null : form.status_reason.trim() || null,
         enabled: form.enabled,
-        status: 'available',
       }
-
       if (!form.id) {
-        await createTarget({
-          ...targetPayload,
-          capabilities: cleanCapabilities.map((capability) => capabilityPayload(capability)),
-        })
+        await createTarget({ ...targetPayload, capabilities: payloads.map(({ payload }) => payload) })
       } else {
         const current = targets.find((target) => target.id === form.id)
         if (!current) throw new Error('Target no longer exists')
-
         await updateTarget(form.id, targetPayload)
-
-        const existingById = new Map((current.capabilities || []).map((capability) => [capability.id, capability]))
-        const incomingIds = new Set(cleanCapabilities.filter((capability) => capability.id).map((capability) => capability.id!))
-
-        for (const oldCapability of current.capabilities || []) {
-          if (!incomingIds.has(oldCapability.id)) {
-            await deleteCapability(form.id, oldCapability.id)
-          }
+        const keep = new Set(rows.filter((row) => row.id).map((row) => row.id))
+        for (const old of current.capabilities || []) {
+          if (!keep.has(old.id)) await deleteCapability(form.id, old.id)
         }
-
-        for (const capability of cleanCapabilities) {
-          const payload = capabilityPayload(capability)
-          if (capability.id && existingById.has(capability.id)) {
-            await updateCapability(form.id, capability.id, payload)
-          } else {
-            await createCapability(form.id, payload)
-          }
+        for (const { row, payload } of payloads) {
+          if (row.id) await updateCapability(form.id, row.id, payload)
+          else await createCapability(form.id, payload)
         }
       }
-
-      resetForm()
+      setMessage({ kind: 'info', text: `${targetPayload.name} saved.` })
+      setForm(blankForm())
       await refresh()
     } catch (error) {
-      setMessage(errorMessage(error))
+      setMessage({ kind: 'error', text: errorMessage(error) })
     } finally {
       setBusy(false)
     }
   }
 
-  async function removeTarget(targetId: string): Promise<void> {
-    if (!window.confirm('Delete this target and all capability mappings?')) return
+  async function remove(target: Target): Promise<void> {
+    if (!window.confirm(`Delete ${target.name}, its capabilities and reservation history?`)) return
     setBusy(true)
-    setMessage(null)
     try {
-      await deleteTarget(targetId)
-      if (form.id === targetId) resetForm()
+      await deleteTarget(target.id)
+      if (form.id === target.id) setForm(blankForm())
       await refresh()
     } catch (error) {
-      setMessage(errorMessage(error))
+      setMessage({ kind: 'error', text: errorMessage(error) })
     } finally {
       setBusy(false)
     }
   }
 
-  async function forceRelease(targetId: string): Promise<void> {
-    const reservation = reservations.find((item) => item.target_id === targetId && item.status === 'active')
-    if (!reservation) {
-      setMessage('No active reservation exists for this target.')
-      return
-    }
-    if (!window.confirm('Force-release this reservation? This also closes active sessions.')) return
-
+  async function forceRelease(reservation: Reservation, target: Target): Promise<void> {
+    if (!window.confirm(`Force-release ${target.name} from ${reservation.user_id}? Their sessions close immediately.`)) return
     setBusy(true)
-    setMessage(null)
     try {
       await forceReleaseReservation(reservation.id)
       await refresh()
     } catch (error) {
-      setMessage(errorMessage(error))
+      setMessage({ kind: 'error', text: errorMessage(error) })
     } finally {
       setBusy(false)
     }
@@ -304,219 +460,98 @@ export default function AdminTargets() {
 
   return (
     <div className="grid" style={{ gap: '1rem' }}>
-      {message && <div className="feedback error">{message}</div>}
+      {message && <div className={`feedback ${message.kind}`} role={message.kind === 'error' ? 'alert' : 'status'}>{message.text}</div>}
 
       <section className="card">
         <div className="page-head">
-          <h3 style={{ margin: 0 }}>{form.id ? 'Edit Target' : 'Create Target'}</h3>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            {form.id && (
-              <button className="button ghost" onClick={resetForm} disabled={busy} type="button">
-                Cancel Edit
-              </button>
-            )}
-            <button className="button" onClick={() => void saveTarget()} disabled={busy} type="button">
-              {busy ? 'Saving...' : 'Save Target'}
-            </button>
+          <h3 style={{ margin: 0 }}>{form.id ? `Edit ${form.name || 'target'}` : 'Add a target'}</h3>
+          <div className="toolbar">
+            {form.id && <button className="button ghost" onClick={() => setForm(blankForm())} disabled={busy} type="button">Cancel</button>}
+            <button className="button" onClick={() => void save()} disabled={busy} type="button">{busy ? 'Saving…' : 'Save target'}</button>
           </div>
         </div>
 
-        <div className="grid two" style={{ marginBottom: '0.8rem' }}>
-          <label>
-            <span className="muted">Name</span>
-            <input className="input" value={form.name} onChange={(event) => setField('name', event.target.value)} />
-          </label>
-          <label>
-            <span className="muted">Vendor</span>
-            <input className="input" value={form.vendor} onChange={(event) => setField('vendor', event.target.value)} />
-          </label>
-          <label>
-            <span className="muted">Board model</span>
-            <input
-              className="input"
-              value={form.board_model}
-              onChange={(event) => setField('board_model', event.target.value)}
-            />
-          </label>
-          <label>
-            <span className="muted">Serial number</span>
-            <input
-              className="input"
-              value={form.serial_number}
-              onChange={(event) => setField('serial_number', event.target.value)}
-            />
-          </label>
-          <label>
-            <span className="muted">Lab</span>
-            <input className="input" value={form.lab_name} onChange={(event) => setField('lab_name', event.target.value)} />
-          </label>
-          <label>
-            <span className="muted">Location</span>
-            <input className="input" value={form.location} onChange={(event) => setField('location', event.target.value)} />
-          </label>
+        <div className="grid three" style={{ marginBottom: '0.8rem' }}>
+          <Field label="Name *"><input className="input" value={form.name} onChange={(e) => setField('name', e.target.value)} placeholder="BOARD-01" /></Field>
+          <Field label="Vendor"><input className="input" value={form.vendor} onChange={(e) => setField('vendor', e.target.value)} /></Field>
+          <Field label="Board model"><input className="input" value={form.board_model} onChange={(e) => setField('board_model', e.target.value)} /></Field>
+          <Field label="Serial number"><input className="input" value={form.serial_number} onChange={(e) => setField('serial_number', e.target.value)} /></Field>
+          <Field label="Lab"><input className="input" value={form.lab_name} onChange={(e) => setField('lab_name', e.target.value)} /></Field>
+          <Field label="Location"><input className="input" value={form.location} onChange={(e) => setField('location', e.target.value)} placeholder="Rack 2, shelf 3" /></Field>
+          <Field label="Tags (comma separated)"><input className="input" value={form.tags} onChange={(e) => setField('tags', e.target.value)} placeholder="stm32-nucleo, lab-a" /></Field>
+          <Field label="Status">
+            <select className="select" value={form.status} onChange={(e) => setField('status', e.target.value as Target['status'])}>
+              <option value="available">Available</option>
+              <option value="maintenance">Maintenance (not reservable)</option>
+              <option value="retired">Retired</option>
+            </select>
+          </Field>
+          {form.status !== 'available' && (
+            <Field label="Reason (shown to users)"><input className="input" value={form.status_reason} onChange={(e) => setField('status_reason', e.target.value)} placeholder="USB hub broken, replacement ordered" /></Field>
+          )}
         </div>
-
-        <label>
-          <span className="muted">Description</span>
-          <textarea
-            className="textarea"
-            value={form.description}
-            onChange={(event) => setField('description', event.target.value)}
-          />
-        </label>
+        <Field label="Description">
+          <textarea className="textarea" value={form.description} onChange={(e) => setField('description', e.target.value)} />
+        </Field>
 
         <div style={{ marginTop: '0.9rem' }}>
           <div className="page-head">
             <h4 style={{ margin: 0 }}>Capabilities</h4>
-            <button className="button ghost" type="button" onClick={addCapabilityRow}>
-              Add capability
-            </button>
+            <div className="toolbar">
+              <button className="button ghost" type="button" onClick={() => setForm((current) => ({ ...current, capabilities: [...current.capabilities, newCapability('serial')] }))}>+ Serial</button>
+              <button className="button ghost" type="button" onClick={() => setForm((current) => ({ ...current, capabilities: [...current.capabilities, newCapability('power')] }))}>+ Power</button>
+              <button className="button ghost" type="button" onClick={() => setForm((current) => ({ ...current, capabilities: [...current.capabilities, newCapability('deploy')] }))}>+ Deploy</button>
+            </div>
           </div>
-
+          {form.capabilities.length === 0 && (
+            <p className="muted">No capabilities: users can still reserve the board (booking only). Add a serial console, power control or firmware deploy.</p>
+          )}
           <div className="capability-grid">
-            {form.capabilities.map((capability, index) => {
-              const resources = resourcesFor(capability.agent_id)
-              return (
-                <div key={capability.id || index} className="capability-row">
-                  <label>
-                    <span className="muted">Name</span>
-                    <input
-                      className="input"
-                      value={capability.name}
-                      placeholder="serial-console"
-                      onChange={(event) => updateCapabilityRow(index, { name: event.target.value })}
-                    />
-                  </label>
-                  <label>
-                    <span className="muted">Type</span>
-                    <select
-                      className="select"
-                      value={capability.capability_type}
-                      onChange={(event) =>
-                        updateCapabilityRow(index, { capability_type: event.target.value as CapabilityType })
-                      }
-                    >
-                      {CAPABILITY_TYPES.map((type) => (
-                        <option value={type} key={type}>
-                          {type}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span className="muted">Provider key</span>
-                    <input
-                      className="input"
-                      value={capability.provider_key}
-                      onChange={(event) => updateCapabilityRow(index, { provider_key: event.target.value })}
-                    />
-                  </label>
-                  <label>
-                    <span className="muted">Agent</span>
-                    <select
-                      className="select"
-                      value={capability.agent_id || ''}
-                      onChange={(event) => updateCapabilityRow(index, { agent_id: event.target.value || null })}
-                    >
-                      <option value="">Unassigned</option>
-                      {agents.map((agent) => (
-                        <option key={agent.id} value={agent.id}>
-                          {agent.name} ({agent.status})
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="wide">
-                    <span className="muted">Discovered resource</span>
-                    <select
-                      className="select"
-                      value={capability.resource_id || ''}
-                      onChange={(event) => updateCapabilityRow(index, { resource_id: event.target.value || null })}
-                    >
-                      <option value="">Unassigned</option>
-                      {resources.map((resource) => (
-                        <option key={resource.id} value={resource.id}>
-                          {resource.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span className="muted">Enabled</span>
-                    <select
-                      className="select"
-                      value={capability.enabled ? 'yes' : 'no'}
-                      onChange={(event) => updateCapabilityRow(index, { enabled: event.target.value === 'yes' })}
-                    >
-                      <option value="yes">Yes</option>
-                      <option value="no">No</option>
-                    </select>
-                  </label>
-                  <div style={{ display: 'flex', alignItems: 'end' }}>
-                    <button className="button danger" type="button" onClick={() => removeCapabilityRow(index)}>
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
+            {form.capabilities.map((row, index) => (
+              <CapabilityEditor key={row.id || index} row={row} agents={agents}
+                onChange={(patch) => patchCapability(index, patch)}
+                onRemove={() => setForm((current) => ({ ...current, capabilities: current.capabilities.filter((_, i) => i !== index) }))} />
+            ))}
           </div>
         </div>
       </section>
 
       <section className="card">
         <div className="page-head">
-          <h3 style={{ margin: 0 }}>Managed Targets</h3>
-          <button className="button" onClick={() => void refresh()} disabled={loading || busy}>
-            {loading ? 'Loading...' : 'Refresh'}
-          </button>
+          <h3 style={{ margin: 0 }}>Targets ({targets.length})</h3>
+          <button className="button" onClick={() => void refresh()} disabled={loading || busy}>{loading ? 'Loading…' : 'Refresh'}</button>
         </div>
-
         <div className="list">
-          {!loading && targets.length === 0 && <div className="card">No targets found.</div>}
+          {!loading && targets.length === 0 && <div className="card empty">No targets yet.</div>}
           {targets.map((target) => {
-            const reservation = reservations.find(
-              (item) => item.target_id === target.id && item.status === 'active',
-            )
-            const status = classifyTargetStatus(target.enabled, !!reservation)
+            const reservation = reservations.find((item) => item.target_id === target.id && new Date(item.starts_at).getTime() <= Date.now())
             return (
               <article key={target.id} className="list-item stacked">
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.7rem' }}>
+                <div className="row-between">
                   <div>
-                    <div style={{ fontWeight: 700 }}>{target.name}</div>
-                    <div className="muted">
-                      {target.vendor || '-'} / {target.board_model || '-'} / {target.location || '-'}
-                    </div>
+                    <div className="target-name">{target.name}</div>
+                    <div className="muted">{[target.vendor, target.board_model, target.lab_name, target.location].filter(Boolean).join(' · ') || '—'}</div>
                   </div>
-                  <span className={`badge ${status}`}>{status}</span>
+                  <StateBadge state={targetState(target)} />
                 </div>
-
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <div className="chip-row">
+                  {(target.tags || []).map((tag) => <span key={tag} className="chip tag">#{tag}</span>)}
                   {(target.capabilities || []).map((capability) => (
-                    <span className="inline-note" key={capability.id}>
-                      {capability.name} ({capability.capability_type})
+                    <span key={capability.id} className={`inline-note ${capability.mode === 'simulated' ? 'warn' : ''}`}>
+                      {capability.name}: {capabilityModeLabel(capability)}
+                      {capability.agent_id ? ` @ ${agentsById[capability.agent_id]?.name || 'unknown agent'}` : ''}
+                      {!capability.enabled ? ' (disabled)' : ''}
                     </span>
                   ))}
                 </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.7rem', flexWrap: 'wrap' }}>
+                <div className="row-between">
                   <div className="muted">
-                    {reservation
-                      ? `Reserved by ${reservation.user_id} until ${prettyDate(reservation.ends_at)}`
-                      : 'No active reservation'}
+                    {reservation ? `Reserved by ${reservation.user_id} until ${prettyTime(reservation.ends_at)}` : target.status_reason || 'Not reserved'}
                   </div>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button className="button ghost" onClick={() => editTarget(target)}>
-                      Edit
-                    </button>
-                    {reservation && (
-                      <button className="button secondary" onClick={() => void forceRelease(target.id)} disabled={busy}>
-                        Force release
-                      </button>
-                    )}
-                    <button className="button danger" onClick={() => void removeTarget(target.id)} disabled={busy}>
-                      Delete
-                    </button>
+                  <div className="toolbar">
+                    <button className="button ghost" onClick={() => edit(target)}>Edit</button>
+                    {reservation && <button className="button secondary" onClick={() => void forceRelease(reservation, target)} disabled={busy}>Force release</button>}
+                    <button className="button danger" onClick={() => void remove(target)} disabled={busy}>Delete</button>
                   </div>
                 </div>
               </article>

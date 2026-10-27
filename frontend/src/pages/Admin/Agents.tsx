@@ -12,6 +12,7 @@ import type { Agent, AgentEnrollment } from '../../services/types'
 import { errorMessage, prettyDate } from '../../utils/ui'
 
 export default function AdminAgents() {
+  const [platform, setPlatform] = useState<'linux' | 'windows'>('linux')
   const [name, setName] = useState('')
   const [agents, setAgents] = useState<Agent[]>([])
   const [enrollments, setEnrollments] = useState<AgentEnrollment[]>([])
@@ -131,8 +132,33 @@ export default function AdminAgents() {
           <p className="muted" style={{ marginBottom: '0.4rem' }}>
             Expires: {prettyDate(latestEnrollment.expires_at)}
           </p>
-          <p className="muted">Install command:</p>
-          <pre className="log-console">{latestEnrollment.install_command || 'No install command returned.'}</pre>
+          <p className="muted">
+            Run on the machine next to your hardware (single use, valid for 30 minutes). The installer verifies
+            checksums and registers the Agent as a service.
+          </p>
+          <div className="chip-row">
+            <button type="button" className={`chip ${platform === 'linux' ? 'active' : ''}`} onClick={() => setPlatform('linux')}>
+              Linux / Raspberry Pi (sudo)
+            </button>
+            <button type="button" className={`chip ${platform === 'windows' ? 'active' : ''}`} onClick={() => setPlatform('windows')}>
+              Windows (PowerShell as Administrator)
+            </button>
+          </div>
+          <pre className="log-console mono" aria-label="install command">
+            {(platform === 'windows' ? latestEnrollment.install_command_windows : latestEnrollment.install_command) ||
+              'No install command returned.'}
+          </pre>
+          <button
+            className="button ghost"
+            type="button"
+            onClick={() =>
+              void navigator.clipboard?.writeText(
+                (platform === 'windows' ? latestEnrollment.install_command_windows : latestEnrollment.install_command) || '',
+              )
+            }
+          >
+            Copy command
+          </button>
         </div>
       )}
 
@@ -147,14 +173,18 @@ export default function AdminAgents() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.6rem' }}>
                   <div>
                     <div style={{ fontWeight: 700 }}>{agent.name}</div>
-                    <div className="muted">Host: {agent.hostname || 'unknown-host'}</div>
+                    <div className="muted">
+                      Host: {agent.hostname || 'unknown-host'}
+                      {agent.platform ? ` · ${agent.platform}` : ''}
+                      {agent.agent_version ? ` · agent ${agent.agent_version}` : ''}
+                    </div>
                     <div className="muted">Last seen: {prettyDate(agent.last_seen_at)}</div>
                   </div>
-                  <span className={`badge ${online ? 'available' : 'disabled'}`}>{online ? 'online' : 'offline'}</span>
+                  <span className={`badge ${online ? 'available' : 'disabled'}`}>{agent.enabled ? agent.status : 'disabled'}</span>
                 </div>
 
                 <div className="table-wrap">
-                  <table>
+                  <table className="table">
                     <thead>
                       <tr>
                         <th>Resource</th>
@@ -205,7 +235,7 @@ export default function AdminAgents() {
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Recent enrollments</h3>
         <div className="table-wrap">
-          <table>
+          <table className="table">
             <thead>
               <tr>
                 <th>Agent name</th>
