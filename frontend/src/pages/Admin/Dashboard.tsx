@@ -1,51 +1,47 @@
-import React, { useState } from 'react'
+import React from 'react'
+import { NavLink, Navigate, useParams } from 'react-router'
 
-import AdminTargets from './Targets'
-import AdminAgents from './Agents'
 import AdminActivity from './Activity'
+import AdminAgents from './Agents'
+import AdminOverview from './Overview'
 import AdminSettings from './Settings'
+import AdminTargets from './Targets'
 import AdminUsers from './Users'
-import AdminConfig from './Config'
 
-const tabs = [
-  { key: 'targets', title: 'Targets', comp: <AdminTargets /> },
-  { key: 'agents', title: 'Agents', comp: <AdminAgents /> },
-  { key: 'activity', title: 'Activity', comp: <AdminActivity /> },
-  { key: 'users', title: 'Users', comp: <AdminUsers /> },
-  { key: 'settings', title: 'Settings', comp: <AdminSettings /> },
-  { key: 'overview', title: 'Overview', comp: <AdminConfig /> },
+const sections = [
+  { key: 'overview', title: 'Overview', render: () => <AdminOverview /> },
+  { key: 'targets', title: 'Targets', render: () => <AdminTargets /> },
+  { key: 'agents', title: 'Agents', render: () => <AdminAgents /> },
+  { key: 'users', title: 'Users', render: () => <AdminUsers /> },
+  { key: 'settings', title: 'Settings', render: () => <AdminSettings /> },
+  { key: 'activity', title: 'Activity log', render: () => <AdminActivity /> },
 ]
 
 export default function AdminDashboard() {
-  const [active, setActive] = useState('targets')
-  const t = tabs.find((x) => x.key === active)!
+  const { section } = useParams()
+  const current = sections.find((item) => item.key === section)
+  if (!current) return <Navigate to="/admin/overview" replace />
+
   return (
     <div>
       <div className="page-head">
         <div>
-          <h2 className="page-title">Admin Control Plane</h2>
-          <p className="muted">Manage targets, map resources, operate agents, and inspect activity.</p>
+          <h2 className="page-title">Administration</h2>
+          <p className="muted">Targets and capabilities, agents, users, lab policy, notifications and the activity log.</p>
         </div>
       </div>
       <div className="admin-layout">
         <aside className="admin-sidebar card">
-          <div className="muted" style={{ marginBottom: '0.7rem' }}>
-            Sections
-          </div>
-          <div className="admin-nav">
-            {tabs.map((tb) => (
-              <button
-                type="button"
-                key={tb.key}
-                className={`admin-nav-btn ${tb.key === active ? 'active' : ''}`}
-                onClick={() => setActive(tb.key)}
-              >
-                {tb.title}
-              </button>
+          <nav className="admin-nav" aria-label="admin sections">
+            {sections.map((item) => (
+              <NavLink key={item.key} to={`/admin/${item.key}`}
+                className={({ isActive }) => `admin-nav-btn ${isActive ? 'active' : ''}`}>
+                {item.title}
+              </NavLink>
             ))}
-          </div>
+          </nav>
         </aside>
-        <section>{t.comp}</section>
+        <section key={current.key}>{current.render()}</section>
       </div>
     </div>
   )

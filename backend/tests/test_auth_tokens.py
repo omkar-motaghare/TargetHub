@@ -7,7 +7,6 @@ import secrets
 
 from app.db.models.user import User
 from app.services.auth_service import AuthService
-
 from tests.helpers import api_client, auth, bootstrap, create_user
 
 

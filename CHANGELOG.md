@@ -39,6 +39,10 @@ boards have been verified with simulators only; see docs/MANUAL_VERIFICATION_CHE
   reader, session takeover, idle reaper and path allowlist; DD fallback; built-in `sim://` board.
 
 ### Web UI
+- Admin overview with a configuration check (offline/disabled agents, missing resources, unset secret
+  variables, simulated capabilities) shown on the overview and on each affected target; `GET /api/v1/system/overview`.
+- **Test connection** for DD and HTTP power capabilities (`POST /api/v1/system/power-check`, read-only).
+- Admin sections have their own URLs (`/app/admin/<section>`); HTTP power basic auth; clearer error texts.
 - Redesigned targets page, reservations, sessions and session workspace, calendar, account page,
   notification bell; admin targets (capability editor for agent/DD/HTTP backends), users, agents
   (Linux/Windows install commands), settings (policy, webhooks), overview and activity log.

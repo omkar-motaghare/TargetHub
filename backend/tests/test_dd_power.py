@@ -8,9 +8,9 @@ import threading
 from pathlib import Path
 
 import pytest
+
 from app.core.config import settings
 from app.providers.dd_power import DDPowerProvider, build_dd_config
-
 from tests.helpers import api_client, auth, bootstrap, create_user, open_session, reserve
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -92,9 +92,17 @@ def test_wrong_api_key_and_unknown_endpoint(dd, monkeypatch):
     assert "not found" in _provider(url, endpoint=99).execute("status").message
 
 
-def test_unreachable_dd_server():
+def test_unreachable_dd_server(api_key):
     result = _provider("http://127.0.0.1:9", timeout_seconds=1).execute("status")
     assert not result.success and "unreachable" in result.message
+
+
+def test_missing_api_key_variable_is_reported_as_such(dd, monkeypatch):
+    monkeypatch.delenv("TARGETHUB_DD_KEY", raising=False)
+    _state, url = dd
+    result = _provider(url).execute("on")
+    assert not result.success
+    assert result.message == "DD API key environment variable 'TARGETHUB_DD_KEY' is not set on the server"
 
 
 @pytest.mark.parametrize(

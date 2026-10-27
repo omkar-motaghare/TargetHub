@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import time
 
-from app.models.agent_operation import AgentOperation
 from sqlalchemy import select
 
+from app.models.agent_operation import AgentOperation
 from tests.helpers import (
     FakeAgent,
     agent_target,

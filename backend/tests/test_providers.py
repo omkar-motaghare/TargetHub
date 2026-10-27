@@ -5,6 +5,7 @@ from typing import Any
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 
 import pytest
+
 from app.providers import registry
 from app.providers.debugger import DebuggerProvider, build_debugger_provider_config
 from app.providers.deployment import DeploymentProvider, build_deployment_provider_config

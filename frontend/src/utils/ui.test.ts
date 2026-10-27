@@ -23,9 +23,9 @@ describe('errorMessage', () => {
     expect(errorMessage(err)).toContain('session expired')
   })
 
-  it('maps conflict api errors to conflict-prefixed message', () => {
+  it('shows the conflict message from the server unchanged', () => {
     const err = new ApiError(409, 'reservation conflict')
-    expect(errorMessage(err)).toContain('Conflict: reservation conflict')
+    expect(errorMessage(err)).toBe('reservation conflict')
   })
 
   it('returns generic Error messages as-is', () => {

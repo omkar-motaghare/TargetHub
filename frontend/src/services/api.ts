@@ -21,6 +21,8 @@ import type {
   UserProfile,
   WaitlistEntry,
   Webhook,
+  PowerCheckResult,
+  SystemOverview,
 } from './types'
 
 export class ApiError extends Error {
@@ -326,6 +328,10 @@ export const updateCapability = (targetId: string, capabilityId: string, input: 
   request<TargetCapability>(`/targets/${targetId}/capabilities/${capabilityId}`, put(input), 'Failed to update target capability')
 export const deleteCapability = (targetId: string, capabilityId: string) =>
   request<void>(`/targets/${targetId}/capabilities/${capabilityId}`, { method: 'DELETE' }, 'Failed to delete target capability')
+
+export const getSystemOverview = () => request<SystemOverview>('/system/overview', {}, 'Failed to load the system overview')
+export const checkPower = (capability_type: string, provider_config: Record<string, unknown>) =>
+  request<PowerCheckResult>('/system/power-check', json({ capability_type, provider_config }), 'Power check failed')
 
 export const listLabs = () => request<string[]>('/labs', {}, 'Failed to list labs')
 

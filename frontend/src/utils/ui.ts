@@ -51,7 +51,7 @@ export function errorMessage(error: unknown): string {
     if (error.kind() === 'forbidden') return error.message && error.message !== 'forbidden'
       ? error.message
       : 'You do not have permission for this action.'
-    if (error.kind() === 'conflict') return `Conflict: ${error.message}`
+    if (error.kind() === 'conflict') return error.message || 'The request conflicts with the current state.'
     if (error.kind() === 'offline') return 'TargetHub server is unreachable. Check your network connection.'
     if (error.kind() === 'validation') return `Validation failed: ${error.message}`
     if (error.kind() === 'rate_limited') return 'Too many attempts. Please wait a few minutes and try again.'

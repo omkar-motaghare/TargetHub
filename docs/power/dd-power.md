@@ -56,6 +56,10 @@ The equivalent `provider_config` for the API/SDK:
 
 An inline `api_key` is rejected on purpose.
 
+Click **Test connection** in the capability editor: the server reads the endpoint status with these
+settings (nothing is switched) and shows the state or the exact error. **Admin → Overview** also warns when
+the API key variable is missing.
+
 ## 3. Test
 
 Reserve the target, open a **power** session and run **Status**, then **Power on**. The result shows the

@@ -3,6 +3,15 @@
 Everything here is under **Admin** in the web UI and needs the *admin* role. All changes are recorded in
 the **Activity log** (audit), filterable by user, action and target.
 
+## Overview
+
+**Admin → Overview** shows live counts (targets, reservations, sessions, waitlist, agents) and a
+**configuration check** that lists what will stop users from working, e.g. a capability whose agent is offline
+or disabled, a missing agent resource, a power capability without a driver, a simulated capability on a
+production server, or a secret environment variable (`api_key_env`, `bearer_token_env`, …) that is not set
+on the server. The same problems appear on each affected target in **Admin → Targets**. Start here after
+installing, upgrading or changing `.env`.
+
 ## Users and roles
 
 **Admin → Users** creates accounts (username, display name, e-mail, role, temporary password).
@@ -75,7 +84,8 @@ POST {controller_url}/v1/outlets/{outlet_id}/on|off|reset|cycle
 ```
 
 `auth_type` is `none`, `bearer` (`bearer_token_env`) or `basic` (`basic_username_env`,
-`basic_password_env`). As with DD, these name **environment variables** on the server, so secrets never
+`basic_password_env`). **Test connection** in the editor reads the outlet status from the server without
+switching anything. As with DD, these name **environment variables** on the server, so secrets never
 enter the database. Add them to `.env` and run `docker compose up -d`.
 
 ## Agents
@@ -105,7 +115,7 @@ platform, agent version and discovered resources.
 | Transcript retention | 30 days | Serial transcripts are deleted afterwards |
 | Audit retention | 365 days | Audit entries are deleted afterwards |
 
-Admins are not exempt from the limits, except for force release.
+Admins are exempt from the duration, advance-booking and per-user limits, and can extend while others wait.
 
 ## Notifications and webhooks
 

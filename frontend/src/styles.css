@@ -273,6 +273,8 @@ a {
 }
 
 .badge {
+	align-self: flex-start;
+	flex: 0 0 auto;
 	border-radius: 999px;
 	padding: 0.15rem 0.7rem;
 	font-size: 0.8rem;
@@ -337,6 +339,8 @@ a {
 }
 
 .admin-nav-btn {
+	display: block;
+	text-decoration: none;
 	border: 1px solid var(--line);
 	background: #fff;
 	color: var(--ink);
@@ -532,6 +536,7 @@ label.inline, .inline { display: inline-flex; align-items: center; gap: 0.4rem; 
 .chip.tag { color: var(--brand-dark); }
 .chip:disabled { opacity: 0.5; cursor: not-allowed; }
 .inline-note.warn { border-color: rgba(181, 71, 8, 0.4); color: var(--reserved); background: rgba(244, 176, 0, 0.12); }
+.inline-note.ok { border-color: rgba(6, 118, 71, 0.4); color: var(--success); background: rgba(6, 118, 71, 0.08); }
 
 .badge.maintenance { background: rgba(244, 176, 0, 0.18); color: #8a5a00; }
 .badge.retired { background: rgba(102, 112, 133, 0.15); color: var(--disabled); }
@@ -607,3 +612,19 @@ label.inline, .inline { display: inline-flex; align-items: center; gap: 0.4rem; 
 	.filters .select { flex: 1 1 140px; }
 	.stat h3 { font-size: 1.3rem; }
 }
+
+/* Admin overview */
+.feedback.success { border: 1px solid rgba(6, 118, 71, 0.35); background: rgba(6, 118, 71, 0.08); color: var(--success); }
+.warn-text { color: var(--reserved); font-weight: 600; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1.2rem; margin: 0 0 0.6rem; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.issue-list { list-style: none; padding: 0; margin: 0 0 0.7rem; display: grid; gap: 0.45rem; }
+.issue { display: flex; gap: 0.6rem; align-items: baseline; padding: 0.55rem 0.7rem; border-radius: 10px; border: 1px solid var(--line); }
+.issue.error { border-color: rgba(180, 35, 24, 0.35); background: rgba(180, 35, 24, 0.05); }
+.issue.warning { border-color: rgba(181, 71, 8, 0.35); background: rgba(244, 176, 0, 0.08); }
+.issue-badge { flex: 0 0 auto; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.issue-badge.error { color: var(--danger); }
+.issue-badge.warning { color: var(--reserved); }
+@media (max-width: 640px) { .kv { grid-template-columns: 1fr; } .kv dt { margin-top: 0.4rem; } }
+.capability-actions { display: flex; justify-content: flex-end; gap: 0.5rem; flex-wrap: wrap; }

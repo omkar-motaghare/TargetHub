@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react'
 
 import StateBadge from '../../components/StateBadge'
 import {
+  checkPower,
+  getSystemOverview,
   createCapability,
   createTarget,
   deleteCapability,
@@ -20,6 +22,7 @@ import type {
   Target,
   TargetCapability,
   TargetCapabilityCreateInput,
+  SystemIssue,
 } from '../../services/types'
 import { capabilityModeLabel, errorMessage, prettyTime, targetState } from '../../utils/ui'
 
@@ -204,6 +207,20 @@ function CapabilityEditor({
   )
   const setConfig = (key: string, value: unknown) => onChange({ config: { ...row.config, [key]: value } })
   const text = (key: string) => String(row.config[key] ?? '')
+  const [check, setCheck] = useState<{ busy: boolean; ok?: boolean; text?: string }>({ busy: false })
+  const canCheck = row.backend === 'dd' || row.backend === 'http'
+
+  async function testConnection(): Promise<void> {
+    setCheck({ busy: true })
+    try {
+      const payload = capabilityPayload(row)
+      const result = await checkPower(row.capability_type, payload.provider_config || {})
+      const state = result.data && typeof result.data.state === 'string' ? ` · state: ${result.data.state}` : ''
+      setCheck({ busy: false, ok: result.success, text: `${result.message}${state}` })
+    } catch (error) {
+      setCheck({ busy: false, ok: false, text: errorMessage(error) })
+    }
+  }
 
   return (
     <div className="capability-row">
@@ -290,12 +307,23 @@ function CapabilityEditor({
             <select className="select" value={text('auth_type') || 'none'} onChange={(e) => setConfig('auth_type', e.target.value)}>
               <option value="none">None</option>
               <option value="bearer">Bearer token (env var)</option>
+              <option value="basic">Basic auth (env vars)</option>
             </select>
           </Field>
           {row.config.auth_type === 'bearer' && (
             <Field label="Token env var">
               <input className="input mono" value={text('bearer_token_env')} onChange={(e) => setConfig('bearer_token_env', e.target.value)} />
             </Field>
+          )}
+          {row.config.auth_type === 'basic' && (
+            <>
+              <Field label="Username env var">
+                <input className="input mono" value={text('basic_username_env')} onChange={(e) => setConfig('basic_username_env', e.target.value)} />
+              </Field>
+              <Field label="Password env var">
+                <input className="input mono" value={text('basic_password_env')} onChange={(e) => setConfig('basic_password_env', e.target.value)} />
+              </Field>
+            </>
           )}
         </>
       )}
@@ -312,9 +340,20 @@ function CapabilityEditor({
         </div>
       )}
 
-      <div style={{ display: 'flex', alignItems: 'end' }}>
+      <div className="wide capability-actions">
+        {canCheck && (
+          <button className="button secondary" type="button" onClick={() => void testConnection()} disabled={check.busy}
+            title="Read the power status from the server with this configuration (does not switch anything)">
+            {check.busy ? 'Testing…' : 'Test connection'}
+          </button>
+        )}
         <button className="button danger" type="button" onClick={onRemove}>Remove</button>
       </div>
+      {check.text && (
+        <div className={`wide inline-note ${check.ok ? 'ok' : 'warn'}`} role="status">
+          {check.ok ? 'Connected: ' : 'Not working: '}{check.text}
+        </div>
+      )}
     </div>
   )
 }
@@ -323,6 +362,7 @@ export default function AdminTargets() {
   const [targets, setTargets] = useState<Target[]>([])
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
+  const [issues, setIssues] = useState<SystemIssue[]>([])
   const [form, setForm] = useState<TargetForm>(blankForm)
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -339,6 +379,8 @@ export default function AdminTargets() {
       setTargets(targetRows)
       setReservations(reservationRows)
       setAgents(agentRows)
+      // The configuration check is advisory; the page works without it.
+      getSystemOverview().then((overview) => setIssues(overview.issues)).catch(() => setIssues([]))
     } catch (error) {
       setMessage({ kind: 'error', text: errorMessage(error) })
     } finally {
@@ -530,7 +572,9 @@ export default function AdminTargets() {
                 <div className="row-between">
                   <div>
                     <div className="target-name">{target.name}</div>
-                    <div className="muted">{[target.vendor, target.board_model, target.lab_name, target.location].filter(Boolean).join(' · ') || '—'}</div>
+                    {[target.vendor, target.board_model, target.lab_name, target.location].some(Boolean) && (
+                      <div className="muted">{[target.vendor, target.board_model, target.lab_name, target.location].filter(Boolean).join(' · ')}</div>
+                    )}
                   </div>
                   <StateBadge state={targetState(target)} />
                 </div>
@@ -544,6 +588,12 @@ export default function AdminTargets() {
                     </span>
                   ))}
                 </div>
+                {issues.filter((issue) => issue.target_id === target.id).map((issue, index) => (
+                  <div key={index} className={`issue ${issue.severity}`}>
+                    <span className={`issue-badge ${issue.severity}`}>{issue.severity === 'error' ? 'Error' : 'Warning'}</span>
+                    {issue.message.replace(`${target.name} · `, '')}
+                  </div>
+                ))}
                 <div className="row-between">
                   <div className="muted">
                     {reservation ? `Reserved by ${reservation.user_id} until ${prettyTime(reservation.ends_at)}` : target.status_reason || 'Not reserved'}

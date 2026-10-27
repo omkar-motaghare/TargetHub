@@ -69,7 +69,9 @@ test('non-admin cannot open the admin area', async ({ page }) => {
 test('admin creates an agent enrollment and sees a checksum-verified install command', async ({ page }) => {
   await signIn(page, ADMIN)
   await page.getByRole('link', { name: 'Admin', exact: true }).click(CLICK)
-  await page.getByRole('button', { name: 'Agents' }).click(CLICK)
+  await expect(page.getByRole('heading', { name: 'Configuration check' })).toBeVisible()
+  await page.getByRole('navigation', { name: 'admin sections' }).getByRole('link', { name: 'Agents' }).click(CLICK)
+  await expect(page).toHaveURL(/\/admin\/agents$/)
   await page.getByPlaceholder('Agent name').fill('ui-smoke-pi')
   await page.getByRole('button', { name: 'Create Enrollment' }).click(CLICK)
   await expect(page.getByLabel('install command')).toContainText('sha256sum -c')

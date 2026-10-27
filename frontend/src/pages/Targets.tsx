@@ -281,9 +281,11 @@ export default function Targets() {
               <div className="row-between">
                 <div>
                   <div className="target-name">{target.name}</div>
-                  <div className="muted">
-                    {[target.vendor, target.board_model, target.lab_name, target.location].filter(Boolean).join(' · ') || '—'}
-                  </div>
+                  {[target.vendor, target.board_model, target.lab_name, target.location].some(Boolean) && (
+                    <div className="muted">
+                      {[target.vendor, target.board_model, target.lab_name, target.location].filter(Boolean).join(' · ')}
+                    </div>
+                  )}
                 </div>
                 <StateBadge state={state} />
               </div>

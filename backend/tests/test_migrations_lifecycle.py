@@ -7,6 +7,9 @@ from pathlib import Path
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import Session
+
 from app.db.models.user import User
 from app.models.agent import Agent, AgentResource
 from app.models.agent_operation import AgentOperation
@@ -15,8 +18,6 @@ from app.models.reservation import Reservation
 from app.models.session import TargetSession
 from app.models.target import Target
 from app.models.target_capability import TargetCapability
-from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.orm import Session
 
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 

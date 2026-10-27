@@ -73,6 +73,10 @@ def _integer(value: Any, name: str, minimum: int) -> int:
     return parsed
 
 
+class DDKeyMissing(Exception):
+    """The capability names an API key variable that is not set on the server."""
+
+
 @dataclass(slots=True, frozen=True)
 class DDPowerConfig:
     base_url: str
@@ -133,7 +137,9 @@ class DDPowerProvider(TargetProvider):
         if self.config.api_key_env:
             key = os.getenv(self.config.api_key_env, "")
             if not key:
-                raise ValueError(f"DD API key environment variable '{self.config.api_key_env}' is not set on the server")
+                raise DDKeyMissing(
+                    f"DD API key environment variable '{self.config.api_key_env}' is not set on the server"
+                )
             headers["X-API-Key"] = key
         return headers
 
@@ -179,13 +185,23 @@ class DDPowerProvider(TargetProvider):
         mac = urllib.parse.quote(self.config.hub_mac, safe="")
         return f"/api/hubs/{mac}/nodes/{self.config.node_id}/endpoints/{self.config.endpoint}"
 
+    @staticmethod
+    def _transport_error(exc: Exception) -> str:
+        if isinstance(exc, DDKeyMissing):
+            return str(exc)
+        if isinstance(exc, (urllib.error.URLError, OSError)):
+            return f"DD server is unreachable: {getattr(exc, 'reason', exc)}"
+        if isinstance(exc, ValueError):
+            return f"DD server returned an unexpected response: {exc}"
+        raise exc
+
     # ---------------------------------------------------------------- operations
 
     def status(self) -> ProviderOperationResult:
         try:
             code, payload = self._call("GET", self._status_path())
-        except (urllib.error.URLError, OSError, ValueError) as exc:
-            return ProviderOperationResult(False, f"DD server is unreachable: {exc}", self._meta())
+        except Exception as exc:  # noqa: BLE001 - mapped to a user-facing message
+            return ProviderOperationResult(False, self._transport_error(exc), self._meta())
         if code != 200:
             return self._failure(code, payload)
         endpoint = payload.get("endpoint") or {}
@@ -217,8 +233,8 @@ class DDPowerProvider(TargetProvider):
         }
         try:
             code, payload = self._call("POST", "/api/endpoints/control", body)
-        except (urllib.error.URLError, OSError, ValueError) as exc:
-            return ProviderOperationResult(False, f"DD server is unreachable: {exc}", self._meta())
+        except Exception as exc:  # noqa: BLE001 - mapped to a user-facing message
+            return ProviderOperationResult(False, self._transport_error(exc), self._meta())
         if code not in (200, 202):
             return self._failure(code, payload)
         if payload.get("emergency_active"):

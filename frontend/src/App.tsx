@@ -77,7 +77,8 @@ function AppFrame() {
           <Route path="/my" element={<RequireAuth><MyReservations /></RequireAuth>} />
           <Route path="/sessions" element={<RequireAuth><Sessions /></RequireAuth>} />
           <Route path="/sessions/:sessionId" element={<RequireAuth><SessionWorkspace /></RequireAuth>} />
-          <Route path="/admin/*" element={<RequireAuth role="admin"><AdminDashboard /></RequireAuth>} />
+          <Route path="/admin" element={<Navigate to="/admin/overview" replace />} />
+          <Route path="/admin/:section" element={<RequireAuth role="admin"><AdminDashboard /></RequireAuth>} />
           <Route path="*" element={<div className="card">Page not found. <Link to="/targets">Go to targets</Link></div>} />
         </Routes>
         </Suspense>

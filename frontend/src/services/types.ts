@@ -279,3 +279,32 @@ export type TargetCapabilityCreateInput = {
 }
 
 export type TargetCapabilityUpdateInput = Partial<TargetCapabilityCreateInput>
+
+export type SystemIssue = {
+  severity: 'error' | 'warning'
+  message: string
+  target_id: string | null
+  target_name: string | null
+}
+
+export type SystemOverview = {
+  version: string
+  environment: string
+  database: string
+  public_url: string
+  simulation_enabled: boolean
+  scheduler_enabled: boolean
+  targets: { total: number } & Record<string, number>
+  reservations_active: number
+  sessions_active: number
+  waitlist_waiting: number
+  users: { total: number; active: number }
+  agents: { total: number; online: number; disabled: number }
+  issues: SystemIssue[]
+}
+
+export type PowerCheckResult = {
+  success: boolean
+  message: string
+  data: Record<string, unknown> | null
+}

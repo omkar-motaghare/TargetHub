@@ -1,7 +1,8 @@
 """Static web routes: SPA entry, agent downloads, and the removed legacy dashboard."""
 
-import app.main as main
 from fastapi.testclient import TestClient
+
+import app.main as main
 
 
 def test_agent_files_are_served():

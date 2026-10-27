@@ -102,6 +102,10 @@ export default function Login() {
               Change password
             </button>
           </p>
+          <p className="muted small">
+            Forgot your password or locked out? Ask a TargetHub administrator to reset it. Accounts are managed in
+            Admin → Users.
+          </p>
         </>
       ) : (
         <>

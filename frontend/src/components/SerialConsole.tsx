@@ -39,6 +39,7 @@ export default function SerialConsole({ sessionId, onEnded }: { sessionId: strin
         triedRefresh.current = false
         setState('connected')
         setDetail('')
+        term.current?.write('\x1b[90m[targethub] Connected. Board output appears here; if it stays silent, check the board is powered on.\x1b[0m\r\n')
         term.current?.focus()
       } else if (message.type === 'output' && message.data) {
         term.current?.write(message.data)

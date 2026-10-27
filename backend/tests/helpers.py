@@ -10,14 +10,15 @@ from datetime import UTC, datetime, timedelta
 
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import sessionmaker
+
 from app.api.dependencies import get_db
 from app.core.config import settings
 from app.db.models.user import User  # noqa: F401 - registers the users table
 from app.db.session import make_engine
 from app.main import app
 from app.models.base import Base
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import sessionmaker
 
 BOOTSTRAP_TOKEN = "test-bootstrap-token"
 ADMIN = ("admin", "admin12345")
