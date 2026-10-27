@@ -41,6 +41,18 @@ def get_current_user(
     return user
 
 
+def resolve_principal(db: Session, token: str):
+    """Return the user a bearer token belongs to, or None (no exceptions)."""
+    if not token:
+        return None
+    auth = AuthService(db)
+    try:
+        payload = auth.verify_token(token)
+    except Exception:
+        return None
+    return auth.repo.get_by_username(payload.get("sub", ""))
+
+
 def require_role(role: str):
     def _dep(user=Depends(get_current_user)):
         roles = (user.roles or "").split(",") if user.roles else []

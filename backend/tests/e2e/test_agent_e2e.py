@@ -325,6 +325,24 @@ def test_full_lab_flow(lab: Lab):
 
     wait_until(got_ui_echo, 20, "serial echo via /serial endpoints")
 
+    # --- interactive console over WebSocket (real agent + pty)
+    from websockets.sync.client import connect as ws_connect
+
+    ws_url = lab.base.replace("http://", "ws://") + f"/api/v1/sessions/{serial_id}/serial/ws"
+    with ws_connect(ws_url, open_timeout=10) as ws:
+        ws.send(json.dumps({"type": "auth", "token": alice}))
+        assert json.loads(ws.recv(timeout=10))["type"] == "ready"
+        ws.send(json.dumps({"type": "input", "data": "ws-line\n"}))
+        streamed = ""
+        deadline = time.monotonic() + 20
+        while "ECHO:ws-line" not in streamed and time.monotonic() < deadline:
+            message = json.loads(ws.recv(timeout=10))
+            if message["type"] == "output":
+                streamed += message["data"]
+        assert "ECHO:ws-line" in streamed, streamed
+    transcript = lab.call("GET", f"/sessions/{serial_id}/serial/log", alice)
+    assert "ECHO:ws-line" in transcript.text
+
     # --- power through fake GPIO (active-low relay: ON drives the line to 0)
     power = open_session("power")
     assert power.status_code == 201, power.text

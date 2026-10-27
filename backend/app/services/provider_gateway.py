@@ -66,6 +66,16 @@ class PendingOperation:
     operation_id: str
     timeout: float
     family: str
+    params: dict[str, Any] | None = None
+
+    def completed(self, remote: dict[str, Any]) -> CompletedOperation:
+        return CompletedOperation(
+            self.session,
+            self.operation,
+            remote.get("message", "ok"),
+            remote.get("data"),
+            params=self.params,
+        )
 
 
 @dataclass
@@ -75,6 +85,7 @@ class CompletedOperation:
     message: str
     data: dict[str, Any] | None = field(default=None)
     success: bool = True
+    params: dict[str, Any] | None = field(default=None)
 
 
 class ProviderGateway:
@@ -93,11 +104,13 @@ class ProviderGateway:
         audit_service: AuditService | None = None,
         target_repository: TargetRepository | None = None,
         agent_operation_service: AgentOperationService | None = None,
+        serial_log_repository=None,
     ):
         self.session_repository = session_repository
         self.audit_service = audit_service
         self.target_repository = target_repository
         self.agent_operation_service = agent_operation_service
+        self.serial_log_repository = serial_log_repository
 
     @staticmethod
     def _uses_agent_transport(session) -> bool:
@@ -266,6 +279,7 @@ class ProviderGateway:
                     operation_id=queued.id,
                     timeout=self.agent_operation_service.timeout_for(session.capability_type),
                     family=AgentOperationService.family_for(session.capability_type) or "agent",
+                    params=params or {},
                 )
             provider = self._get_provider(session)
             if operation not in provider.operations():
@@ -276,13 +290,46 @@ class ProviderGateway:
         except ConflictResource as exc:
             self._record(session, user_id, operation, False, str(exc))
             raise
-        return CompletedOperation(session, operation, result.message, result.data, result.success)
+        return CompletedOperation(
+            session, operation, result.message, result.data, result.success, params=params or {}
+        )
+
+    def _capture(self, outcome: CompletedOperation, result: dict[str, Any]) -> None:
+        """Append serial console traffic to the session transcript."""
+        if self.serial_log_repository is None or outcome.session.capability_type != "serial":
+            return
+        try:
+            if outcome.operation == "read":
+                text = (result.get("data") or {}).get("data_text") or ""
+                self.serial_log_repository.append(outcome.session.id, "out", text)
+            elif outcome.operation == "write":
+                text = str((outcome.params or {}).get("text", ""))
+                self.serial_log_repository.append(outcome.session.id, "in", text)
+        except Exception as exc:  # pragma: no cover - transcript is best effort
+            from app.core.logging import logger
+
+            logger.warning(f"Failed to store serial transcript: {exc}")
 
     def finish(self, user_id: str, outcome: CompletedOperation) -> dict[str, Any]:
-        self._record(outcome.session, user_id, outcome.operation, outcome.success, outcome.message)
+        quiet = outcome.session.capability_type == "serial" and outcome.operation in {"read", "write"}
+        if quiet:
+            # Console reads/writes are high-volume; they go to the transcript and
+            # metrics, not one audit row per keystroke.
+            metrics.inc(
+                "targethub_provider_operations_total",
+                labels={
+                    "capability": "serial",
+                    "operation": outcome.operation,
+                    "success": str(outcome.success).lower(),
+                },
+            )
+        else:
+            self._record(outcome.session, user_id, outcome.operation, outcome.success, outcome.message)
         if not outcome.success:
             raise ConflictResource(outcome.message)
-        return self._result(outcome.session, outcome.operation, outcome.message, outcome.data)
+        result = self._result(outcome.session, outcome.operation, outcome.message, outcome.data)
+        self._capture(outcome, result)
+        return result
 
     def fail(self, user_id: str, pending: PendingOperation, exc: Exception) -> None:
         self._record(pending.session, user_id, pending.operation, False, str(exc))
@@ -309,9 +356,7 @@ class ProviderGateway:
             except ConflictResource as exc:
                 self.fail(user_id, outcome, exc)
                 raise
-            outcome = CompletedOperation(
-                outcome.session, outcome.operation, remote.get("message", "ok"), remote.get("data")
-            )
+            outcome = outcome.completed(remote)
         return self.finish(user_id, outcome)
 
     async def execute_async(
@@ -340,9 +385,7 @@ class ProviderGateway:
             except ConflictResource as exc:
                 await run_in_threadpool(self.fail, user_id, outcome, exc)
                 raise
-            outcome = CompletedOperation(
-                outcome.session, outcome.operation, remote.get("message", "ok"), remote.get("data")
-            )
+            outcome = outcome.completed(remote)
         return await run_in_threadpool(self.finish, user_id, outcome)
 
     def operation_status(self, session_id: str, user_id: str, operation_id: str, *, is_admin: bool):

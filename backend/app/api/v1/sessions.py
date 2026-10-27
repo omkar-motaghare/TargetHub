@@ -1,6 +1,7 @@
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,7 @@ from app.repositories.agent_operation_repository import AgentOperationRepository
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.audit_repository import AuditRepository
 from app.repositories.reservation_repository import ReservationRepository
+from app.repositories.serial_log_repository import SerialLogRepository
 from app.repositories.session_repository import SessionRepository
 from app.repositories.target_repository import TargetRepository
 from app.schemas.session import SessionCreate, SessionPublicResponse, SessionResponse
@@ -43,7 +45,7 @@ def get_service(db: Annotated[Session, Depends(get_db)]) -> SessionService:
 Service = Annotated[SessionService, Depends(get_service)]
 
 
-def get_provider_gateway(db: Annotated[Session, Depends(get_db)]) -> ProviderGateway:
+def build_gateway(db: Session) -> ProviderGateway:
     return ProviderGateway(
         SessionRepository(db),
         AuditService(AuditRepository(db)),
@@ -53,7 +55,12 @@ def get_provider_gateway(db: Annotated[Session, Depends(get_db)]) -> ProviderGat
             SessionRepository(db),
             AgentRepository(db),
         ),
+        SerialLogRepository(db),
     )
+
+
+def get_provider_gateway(db: Annotated[Session, Depends(get_db)]) -> ProviderGateway:
+    return build_gateway(db)
 
 
 Gateway = Annotated[ProviderGateway, Depends(get_provider_gateway)]
@@ -102,8 +109,6 @@ def get_session(
 ):
     session = service.get_session(session_id)
     if session.user_id != user.username and not is_admin_user(user):
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=403, detail="forbidden")
     return present(session, user)
 
@@ -236,3 +241,30 @@ async def serial_close(
     user=Depends(get_current_user),
 ):
     return scrub(await gateway.execute_async(session_id, user.username, "close"), user)
+
+
+@router.get("/{session_id}/serial/log", response_class=PlainTextResponse)
+def serial_log(
+    session_id: str,
+    service: Service,
+    db: Annotated[Session, Depends(get_db)],
+    include_input: bool = Query(default=False, description="Interleave what the user typed (prefixed '>> ')"),
+    user=Depends(get_current_user),
+):
+    """Download the console transcript of a serial session (owner or admin)."""
+    session = service.get_session(session_id)
+    if session.user_id != user.username and not is_admin_user(user):
+        raise HTTPException(status_code=403, detail="forbidden")
+    if session.capability_type != "serial":
+        raise HTTPException(status_code=409, detail="Session is not a serial session")
+    parts = []
+    for chunk in SerialLogRepository(db).chunks(session_id, include_input=include_input):
+        if chunk.direction == "in":
+            parts.append("".join(f">> {line}\n" for line in chunk.data.splitlines() or [""]))
+        else:
+            parts.append(chunk.data)
+    filename = f"targethub-serial-{session_id[:8]}.log"
+    return PlainTextResponse(
+        "".join(parts),
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
