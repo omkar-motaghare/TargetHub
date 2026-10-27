@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from app.models.reservation import Reservation
 from app.services.scheduler import run_maintenance
 
-from tests.helpers import api_client, auth, bootstrap, create_user, reserve
+from tests.helpers import api_client, auth, bootstrap, create_user, enroll_agent, heartbeat, reserve
 
 
 def _target(client, admin, name, tags=()):
@@ -263,3 +263,30 @@ def test_waitlist_entry_lookup_shows_fulfilment(tmp_path, monkeypatch):
         client.post(f"/api/v1/reservations/{held['id']}/release", headers=auth(alice))
         looked_up = client.get(f"/api/v1/waitlist/{entry['id']}", headers=auth(bob)).json()
         assert looked_up["status"] == "fulfilled" and looked_up["reservation_id"]
+
+
+def test_agent_liveness_transitions_are_announced_once(tmp_path, monkeypatch):
+    from app.models.agent import Agent
+    from app.services.notifier import Notifier
+
+    events: list[str] = []
+    monkeypatch.setattr(Notifier, "broadcast", lambda self, event, message, data=None: events.append(event) or 1)
+    with api_client(tmp_path, monkeypatch) as (client, session_local):
+        admin = bootstrap(client)
+        agent_id, credential = enroll_agent(client, admin, "pi-01")
+        heartbeat(client, agent_id, credential, [])
+        assert events == []
+
+        with session_local() as db:
+            agent = db.get(Agent, agent_id)
+            agent.last_seen_at = datetime.now(UTC) - timedelta(minutes=5)
+            db.commit()
+        # Listing agents notices the stale heartbeat first; the scheduler must not announce it again.
+        assert client.get("/api/v1/agents", headers=auth(admin)).json()[0]["status"] == "offline"
+        with session_local() as db:
+            run_maintenance(db)
+        assert events == ["agent.offline"]
+
+        heartbeat(client, agent_id, credential, [])
+        heartbeat(client, agent_id, credential, [])
+        assert events == ["agent.offline", "agent.online"]

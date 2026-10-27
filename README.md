@@ -2,429 +2,112 @@
 
 > **One Platform. Every Target.**
 
-**Author:** Omkar Motaghare
+TargetHub is an open-source **embedded lab orchestration platform**. It lets an engineering team share
+boards safely: reserve a target, get exclusive access to its serial console, power and firmware deploy,
+and give it back, from a browser, the CLI, the Python SDK, VS Code or a CI pipeline.
 
-TargetHub is an open-source **Embedded Lab Orchestration Platform** that enables engineering teams to efficiently manage shared embedded hardware through a unified interface. It provides target reservation, exclusive hardware access, power control, serial console, firmware deployment, debugger integration, and lab automation—eliminating resource conflicts while improving developer productivity.
-
-> 🚧 **Project Status:** v0.1.0 (local release candidate) — hub, Raspberry Pi/Linux agent, React UI, Python SDK/CLI and VS Code extension are implemented and tested on a Linux dev host. No real Raspberry Pi hardware has been tested yet. See [CHANGELOG](CHANGELOG.md), [Raspberry Pi install](docs/agents/raspberry-pi.md) and [backup/TLS docs](docs/deployment/backup.md).
+**Author:** Omkar Motaghare · **License:** Apache-2.0 · **Version:** 0.2.0 ([changelog](CHANGELOG.md))
 
 ---
 
-# Current Prototype Run Path
+## What you get
 
-TargetHub now uses a React-first frontend direction.
+| Area | Features |
+| --- | --- |
+| Reservations | Live availability, calendar, reserve now or later, extend, release, **reserve any free board by tag**, **waitlist** that auto-assigns the board when it frees up, per-team policy (max duration, advance booking, per-user limits), maintenance mode |
+| Sessions | Exclusive, owner-only sessions; **browser serial console** (WebSocket, xterm.js) with full transcripts you can download; power on/off/cycle/status; checksummed firmware deploy |
+| Power | **DD (Doordarshan) REST power system** run from the server, generic HTTP power controllers, or relays/GPIO on an Agent |
+| Agents | One small Python file for **Linux, Raspberry Pi and Windows** hosts; outbound-only (works behind NAT); serial ports, GPIO relays and deploy commands declared locally on the agent |
+| Accounts | Local accounts, roles **admin / user / viewer**, rotating refresh tokens, personal API tokens for CI, rate-limited login, audit log |
+| Notifications | In-app bell plus Slack, Microsoft Teams and generic (HMAC-signed) webhooks |
+| Automation | Python SDK + `targethub` CLI, VS Code extension, REST API with OpenAPI docs at `/docs`, Prometheus `/metrics` |
+| Operations | Docker Compose (PostgreSQL) install for Linux and Windows, TLS overlay, backup/restore, admin recovery CLI, health checks |
 
-1. Start the backend stack with Docker Compose.
-2. Use the backend-served React frontend as the canonical UI path.
+No hardware yet? A **simulated lab** (mock DD power server + virtual board) lets you try every feature;
+see [Simulators and demo lab](docs/development/simulators.md).
+
+## Quick start
+
+Requirements: Docker with the compose v2 plugin (Docker Desktop on Windows/macOS).
 
 ```bash
-docker compose up -d --build
+git clone https://github.com/omkar-motaghare/TargetHub.git && cd TargetHub
+scripts/install.sh                     # Linux / macOS
 ```
 
-Data persistence notes:
-
-- Canonical stack uses PostgreSQL, Redis, and MinIO via `docker-compose.yml`.
-- Persistent data is stored in named volumes:
-  `targethub_postgres_data`, `targethub_redis_data`, and `targethub_minio_data`.
-- Restarting or recreating containers keeps data.
-- Running `docker compose down -v` deletes volumes and will reset data.
-
-Then open:
-
-- Canonical frontend (React): http://localhost:8000/app
-- Dashboard alias (React): http://localhost:8000/dashboard
-- Legacy fallback dashboard: http://localhost:8000/legacy-dashboard
-- Backend API docs: http://localhost:8000/docs
-
-Frontend/API smoke verification:
-
-```bash
-TARGETHUB_ADMIN_USER=admin TARGETHUB_ADMIN_PASS=change-me-now ./scripts/frontend_smoke_api.sh
+```powershell
+git clone https://github.com/omkar-motaghare/TargetHub.git; cd TargetHub
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1   # Windows
 ```
 
-Important notes:
+The installer writes `.env` with random secrets, starts PostgreSQL and the TargetHub server, and prints
+the URL plus a one-time **bootstrap token**. Open the URL, create the first admin with that token, then:
 
-- The React app under frontend/ is the canonical UI path.
-- The backend-served dashboard under backend/app/web/ remains a temporary migration fallback and reference implementation only.
+1. **Admin → Targets**: add a board and its capabilities (serial, power, deploy).
+2. Either add **DD power** directly (no agent needed), or **Admin → Agents** → create an enrollment and
+   run the printed command on the Raspberry Pi / Linux / Windows machine the board is plugged into.
+3. **Admin → Users**: invite your team (role *user*, or *viewer* for read-only).
 
----
+Full instructions: [Installation](docs/getting-started/install.md).
 
-# Vision
-
-To become the standard platform for managing embedded development laboratories by providing a secure, extensible, and unified solution for hardware orchestration.
-
----
-
-# Mission
-
-Empower embedded engineering teams with a modern platform that simplifies hardware access, automates laboratory operations, eliminates resource conflicts, and enables seamless collaboration throughout the firmware development lifecycle.
-
----
-
-# Why TargetHub?
-
-Embedded development teams often share hardware targets connected to a common Linux workstation or development lab. As teams grow, managing these shared resources becomes increasingly difficult.
-
-Common challenges include:
-
-- Unknown target availability
-- Manual coordination through chat messages
-- Developers accidentally interrupting each other's work
-- Lost debugging sessions
-- Firmware overwritten by another user
-- No centralized ownership of hardware
-- Multiple disconnected tools for different tasks
-
-TargetHub was created to solve these problems by providing a single platform that manages the complete lifecycle of embedded hardware access.
-
----
-
-# What is TargetHub?
-
-TargetHub is **not just a board reservation tool**.
-
-It is a complete **Embedded Lab Orchestration Platform**.
-
-TargetHub manages the entire embedded development workflow, including:
-
-- Target Reservation
-- Exclusive Session Management
-- Power Control
-- Serial Console Access
-- SSH/Telnet Access
-- Firmware Deployment
-- J-Link Debugging
-- VS Code Integration
-- REST APIs
-- Lab Automation
-- Multi-Lab Management
-- Hardware Plugin Framework
-
----
-
-# Design Philosophy
-
-TargetHub is built around a few simple principles.
-
-## One Platform
-
-Every interaction with laboratory hardware should begin from TargetHub.
-
-## One Target
-
-Only one developer owns a target at any given time.
-
-## One Session
-
-Every reservation creates an isolated development session.
-
-## One API
-
-Every capability should be accessible through a consistent REST API.
-
-## One Plugin Framework
-
-Hardware-specific functionality belongs in plugins—not in the core platform.
-
----
-
-# Core Principles
-
-- Documentation before implementation
-- Architecture Decision Records (ADR) for architectural decisions
-- RFCs before major feature implementation
-- API-first development
-- Plugin-based architecture
-- Hardware abstraction through providers
-- Security by default
-- Developer-first experience
-- Extensibility over shortcuts
-- Clean architecture
-- Testable components
-- Open-source friendly
-
----
-
-# High-Level Architecture
+## Architecture
 
 ```text
-                        Developer
-                             │
-         ┌───────────────────┴───────────────────┐
-         │                                       │
-    VS Code Extension                    Web Dashboard
-         │                                       │
-         └───────────────────┬───────────────────┘
-                             │
-                     TargetHub Core
-                             │
- ┌────────────────────────────────────────────────────────────┐
- │                                                            │
- │  Reservation Engine                                        │
- │  Session Manager                                           │
- │  Authentication & Authorization                            │
- │  REST API                                                  │
- │  WebSocket Gateway                                         │
- │  Audit & Logging                                           │
- │                                                            │
- └────────────────────────────────────────────────────────────┘
-                             │
-                     Provider Framework
-                             │
- ┌──────────────┬──────────────┬──────────────┬───────────────┐
- │              │              │              │               │
- │ Serial       │ Debugger     │ Power        │ Deployment    │
- │ Provider     │ Provider     │ Provider     │ Provider      │
- │              │              │              │               │
- └──────────────┴──────────────┴──────────────┴───────────────┘
-                             │
-                    Embedded Hardware
+ Browser UI · VS Code · targethub CLI / Python SDK · CI jobs
+                       │  HTTPS (REST + WebSocket)
+              ┌────────┴─────────┐
+              │ TargetHub server │  reservations, sessions, auth, policy, waitlist,
+              │ FastAPI + React  │  notifications, audit, scheduler
+              └──┬────────────┬──┘
+   server-hosted │            │ outbound long-poll (no inbound ports on the agent)
+   DD / HTTP power            │
+        ┌────────┴──┐   ┌─────┴──────────────────────┐
+        │ DD power  │   │ TargetHub Agent             │  Raspberry Pi / Linux / Windows
+        │ system    │   │ serial · GPIO relay · deploy│
+        └───────────┘   └─────┬──────────────────────┘
+                              │ USB-serial, GPIO, flashing tools
+                        Embedded targets
 ```
 
----
+Read more in [Architecture overview](docs/architecture/overview.md).
 
-# Planned Features
+## Documentation
 
-## Hardware Management
+- [Installation](docs/getting-started/install.md) (Linux, Windows, published image, TLS, without Docker)
+- [User guide](docs/user-guide/using-targethub.md) · [Administration](docs/admin-guide/administration.md)
+- [Agents: Linux, Raspberry Pi, Windows](docs/agents/agent-guide.md) · [DD power](docs/power/dd-power.md)
+- [CLI, SDK and CI / hardware-in-the-loop](docs/automation/ci-hil.md) · [VS Code](vscode-extension/README.md)
+- [Upgrade and rollback](docs/operations/upgrade.md) · [Backup](docs/deployment/backup.md) ·
+  [TLS](docs/deployment/tls.md) · [Troubleshooting](docs/operations/troubleshooting.md) ·
+  [Security](docs/operations/security.md)
+- [Development](docs/developer-guide/local-docker-development.md) ·
+  [Simulators and demo lab](docs/development/simulators.md) ·
+  [Manual verification checklist](docs/MANUAL_VERIFICATION_CHECKLIST.md)
 
-- Target reservation
-- Target groups
-- Exclusive ownership
-- Automatic timeout
-- Reservation history
-- Hardware inventory
+Browse them as a site with `pip install mkdocs-material && mkdocs serve`.
 
-## Hardware Access
-
-- Browser-based serial console
-- SSH/Telnet proxy
-- FTP/SFTP file transfer
-- J-Link debugging
-- Firmware flashing
-- Session recording
-
-## Power Management
-
-- Power ON/OFF
-- Reset
-- Power cycling
-- Hardware status
-- REST-based power providers
-
-## Developer Experience
-
-- VS Code Extension
-- CLI
-- REST API
-- Web Dashboard
-- Notifications
-- Live hardware status
-
-## Administration
-
-- User management
-- Roles & permissions
-- Audit logs
-- Multi-team support
-- Multi-lab support
-
----
-
-# Plugin Architecture
-
-TargetHub is designed to be hardware agnostic.
-
-Every hardware integration is implemented as a plugin.
-
-Examples include:
-
-- Serial Providers
-- Debugger Providers
-- Power Providers
-- Deployment Providers
-- Authentication Providers
-- Notification Providers
-
-This architecture allows organizations to integrate their existing hardware without modifying the TargetHub core.
-
----
-
-# Planned Project Structure
+## Repository layout
 
 ```text
-TargetHub/
-│
-├── backend/
-├── frontend/
-├── cli/
-├── sdk/
-├── vscode-extension/
-├── plugins/
-├── docker/
-├── scripts/
-├── tests/
-│
-├── docs/
-│   ├── architecture/
-│   ├── adr/
-│   ├── rfcs/
-│   ├── api/
-│   ├── developer-guide/
-│   └── project-journal/
-│
-└── .github/
+backend/            FastAPI server, Alembic migrations, tests; agent files in backend/app/web/agent/
+frontend/           React UI (built into the server image)
+sdk/python/         Python SDK and `targethub` CLI
+vscode-extension/   VS Code extension
+tools/              Mock DD server, virtual board, demo lab
+scripts/            install, backup/restore, admin reset, end-to-end tests
+docs/               Documentation (MkDocs)
 ```
 
----
+## Project status
 
-# Documentation Strategy
+0.2.0 is feature-complete for reservations, sessions, serial, power (DD/HTTP/GPIO) and deploy, and is
+covered by automated tests on Linux. The DD driver, agents on Raspberry Pi and Windows hosts, and real
+boards have been verified **only against simulators** so far; please run the
+[manual verification checklist](docs/MANUAL_VERIFICATION_CHECKLIST.md) on your lab and report differences.
+SSH/Telnet proxying and J-Link debugging are on the [roadmap](docs/development/ROADMAP.md).
 
-TargetHub follows a **Documentation-Driven Development** approach.
+## Contributing
 
-Every major feature will include:
-
-- Architecture Documentation
-- ADR
-- RFC
-- API Specification
-- Sequence Diagram
-- Database Design
-- Implementation
-- Unit Tests
-- Integration Tests
-- User Documentation
-
----
-
-# Roadmap
-
-## Sprint 0
-
-Foundation & Architecture
-
-- Repository initialization
-- Documentation framework
-- MkDocs setup
-- Architecture blueprint
-- ADR framework
-- RFC framework
-- Project roadmap
-- CI/CD foundation
-
----
-
-## Phase 1
-
-Core Platform
-
-- Authentication
-- Reservation Engine
-- Session Manager
-- Dashboard
-- REST API
-
----
-
-## Phase 2
-
-Hardware Providers
-
-- Serial Provider
-- Power Provider
-- Deployment Provider
-- J-Link Provider
-
----
-
-## Phase 3
-
-Developer Experience
-
-- VS Code Extension
-- CLI
-- Browser Terminal
-- Notifications
-
----
-
-## Phase 4
-
-Advanced Features
-
-- Multi-Lab Management
-- Analytics
-- Scheduling
-- Automation
-- Plugin Marketplace
-
----
-
-# Engineering Workflow
-
-Every major feature follows the same development lifecycle.
-
-```text
-Requirement
-      │
-      ▼
-Discussion
-      │
-      ▼
-Architecture Decision (ADR)
-      │
-      ▼
-RFC
-      │
-      ▼
-API Design
-      │
-      ▼
-Implementation
-      │
-      ▼
-Testing
-      │
-      ▼
-Documentation
-      │
-      ▼
-Release
-```
-
----
-
-# License
-
-Licensed under the **Apache License 2.0**.
-
----
-
-# Contributing
-
-Contributions are welcome.
-
-Before implementing a major feature, please create an RFC and discuss the proposed design with the community.
-
----
-
-# Project Status
-
-🚧 **TargetHub is currently under active development.**
-
-The project is in the architecture and planning phase. The focus is on building a robust, extensible foundation before implementation begins.
-
----
-
-# Acknowledgements
-
-TargetHub is inspired by real-world challenges faced by embedded software teams working with shared hardware resources. The project aims to modernize embedded laboratory workflows through automation, standardization, and an exceptional developer experience.
-
----
-
-## Our Goal
-
-> **Build the platform we always wished existed for embedded development labs.**
-
-If you've ever lost work because someone else unknowingly powered off your board, flashed new firmware, or started a debugging session on the same target—you'll understand why TargetHub exists.
-
-**Welcome to TargetHub.**
+Issues and pull requests are welcome. Run the test suites described in
+[development docs](docs/developer-guide/local-docker-development.md) before opening a PR; CI runs them
+on every push.

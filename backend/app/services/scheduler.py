@@ -106,13 +106,8 @@ def run_maintenance(db: Session, now: datetime | None = None) -> dict[str, int]:
     # 4. Waitlist.
     stats["waitlist_fulfilled"] = WaitlistService(db).process(now)
 
-    # 5. Agent liveness transitions.
-    for agent in AgentService(AgentRepository(db)).mark_stale_offline():
-        notifier.event(
-            "agent.offline",
-            f"Agent '{agent.name}' ({agent.hostname or 'unknown host'}) stopped sending heartbeats",
-            data={"agent": agent.name, "hostname": agent.hostname},
-        )
+    # 5. Agent liveness transitions (announced as agent.offline by the service).
+    stats["agents_offline"] = len(AgentService(AgentRepository(db)).mark_stale_offline())
 
     # 6. Retention.
     stats["transcripts_purged"] = SerialLogRepository(db).purge_before(

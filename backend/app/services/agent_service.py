@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.core.exceptions import AuthenticationError, ConflictResource, ResourceNotFound
 from app.models.agent import Agent, AgentEnrollment, AgentResource
 from app.repositories.agent_repository import AgentRepository
+from app.services.notifier import Notifier
 
 ENROLLMENT_TTL_MINUTES = 30
 AGENT_OFFLINE_AFTER_SECONDS = int(os.getenv("TARGETHUB_AGENT_OFFLINE_AFTER_SECONDS", "45"))
@@ -33,9 +34,9 @@ class AgentService:
     def _now() -> datetime:
         return datetime.now(UTC)
 
-    def _refresh_liveness(self, agents: list[Agent]):
+    def _stale(self, agents: list[Agent]) -> list[Agent]:
         cutoff = self._now() - timedelta(seconds=AGENT_OFFLINE_AFTER_SECONDS)
-        changed_agents = []
+        stale = []
         for agent in agents:
             if agent.status != "online" or not agent.last_seen_at:
                 continue
@@ -43,27 +44,35 @@ class AgentService:
             if last_seen.tzinfo is None:
                 last_seen = last_seen.replace(tzinfo=UTC)
             if last_seen < cutoff:
-                agent.status = "offline"
-                changed_agents.append(agent)
-        for agent in changed_agents:
+                stale.append(agent)
+        return stale
+
+    def _announce(self, agent: Agent, event: str) -> None:
+        db = getattr(self.repository, "db", None)
+        if db is None:  # in-memory repositories used by unit tests
+            return
+        state = "stopped sending heartbeats" if event == "agent.offline" else "is back online"
+        Notifier(db).event(
+            event,
+            f"Agent '{agent.name}' ({agent.hostname or 'unknown host'}) {state}",
+            data={"agent": agent.name, "hostname": agent.hostname},
+        )
+
+    def _mark_offline(self, agents: list[Agent]) -> list[Agent]:
+        changed = self._stale(agents)
+        for agent in changed:
+            agent.status = "offline"
             self.repository.save(agent)
+            self._announce(agent, "agent.offline")
+        return changed
+
+    def _refresh_liveness(self, agents: list[Agent]):
+        self._mark_offline(agents)
         return agents
 
     def mark_stale_offline(self) -> list[Agent]:
-        """Flip online Agents without a recent heartbeat to offline; returns those changed."""
-        cutoff = self._now() - timedelta(seconds=AGENT_OFFLINE_AFTER_SECONDS)
-        changed = []
-        for agent in self.repository.list():
-            if agent.status != "online" or not agent.last_seen_at:
-                continue
-            last_seen = agent.last_seen_at
-            if last_seen.tzinfo is None:
-                last_seen = last_seen.replace(tzinfo=UTC)
-            if last_seen < cutoff:
-                agent.status = "offline"
-                self.repository.save(agent)
-                changed.append(agent)
-        return changed
+        """Flip online Agents without a recent heartbeat to offline (and announce it)."""
+        return self._mark_offline(self.repository.list())
 
     def list_agents(self):
         return self._refresh_liveness(self.repository.list())
@@ -175,6 +184,7 @@ class AgentService:
         agent.hostname = hostname or agent.hostname
         agent.agent_version = agent_version or agent.agent_version
         agent.platform = platform or agent.platform
+        came_back = agent.status == "offline"
         agent.status = "online"
         agent.last_seen_at = self._now()
 
@@ -205,7 +215,10 @@ class AgentService:
             next_resources.append(current)
 
         agent.resources[:] = next_resources
-        return self.repository.save(agent)
+        saved = self.repository.save(agent)
+        if came_back:
+            self._announce(saved, "agent.online")
+        return saved
 
     def disable(self, agent_id: str):
         agent = self.get_agent(agent_id)

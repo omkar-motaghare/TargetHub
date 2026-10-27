@@ -1,11 +1,10 @@
 import importlib.util
 import json
 import os
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-
-import sys
 
 import pytest
 
