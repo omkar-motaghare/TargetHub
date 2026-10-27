@@ -1,11 +1,12 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
 from app.models.base import Base
+from app.models.types import UTCDateTime
 
 
 class SerialLogChunk(Base):
@@ -22,5 +23,5 @@ class SerialLogChunk(Base):
     size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     data: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+        UTCDateTime(), server_default=func.now(), nullable=False, index=True
     )

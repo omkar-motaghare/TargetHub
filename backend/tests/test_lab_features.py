@@ -236,3 +236,16 @@ def test_webhooks_deliver_signed_events_and_hide_secrets(tmp_path, monkeypatch):
             assert bad.status_code == 422
     finally:
         server.shutdown()
+
+
+def test_api_timestamps_always_carry_utc_offset(tmp_path, monkeypatch):
+    """SQLite drops offsets; clients must still receive unambiguous UTC times."""
+    with api_client(tmp_path, monkeypatch) as (client, _db):
+        admin = bootstrap(client)
+        board = _target(client, admin, "B1")
+        reservation = reserve(client, admin, board["id"])
+        for value in (board["created_at"], reservation["starts_at"], reservation["ends_at"]):
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            assert parsed.utcoffset() == timedelta(0), value
+        listed = client.get("/api/v1/reservations", headers=auth(admin)).json()[0]
+        assert datetime.fromisoformat(listed["ends_at"].replace("Z", "+00:00")).tzinfo is not None

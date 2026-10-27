@@ -78,6 +78,19 @@ def build_install_command(base_url: str, token: str) -> str:
     )
 
 
+def build_windows_install_command(base_url: str, token: str) -> str:
+    """PowerShell (elevated) equivalent: download, verify installer hash, run with agent hash."""
+    insecure = " -AllowInsecureHttp" if base_url.startswith("http://") else ""
+    return (
+        "$f=\"$env:TEMP\\targethub-install.ps1\"; "
+        f"Invoke-WebRequest -UseBasicParsing '{base_url}/web/agent/install.ps1' -OutFile $f; "
+        f"if ((Get-FileHash $f -Algorithm SHA256).Hash -ne '{_sha256_of('install.ps1')}') "
+        "{ throw 'installer checksum mismatch' }; "
+        f"powershell -NoProfile -ExecutionPolicy Bypass -File $f -TargetHubUrl '{base_url}' "
+        f"-EnrollmentToken '{token}' -AgentSha256 {_sha256_of('targethub_agent.py')}{insecure}"
+    )
+
+
 @router.get("", response_model=list[AgentResponse])
 def list_agents(service: Service, _admin=Depends(require_role("admin"))):
     return service.list_agents()
@@ -102,6 +115,7 @@ def create_enrollment(request: AgentEnrollmentCreate, service: Service, _admin=D
         token=token,
         targethub_url=base_url,
         install_command=build_install_command(base_url, token),
+        install_command_windows=build_windows_install_command(base_url, token),
     )
 
 

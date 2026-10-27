@@ -1,9 +1,10 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, true
+from sqlalchemy import Boolean, Integer, String, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.models.types import UTCDateTime
 
 # Known roles. "viewer" may look but not reserve or operate hardware.
 ROLE_ADMIN = "admin"
@@ -29,8 +30,8 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
     # Bumped to invalidate every outstanding token (password change, disable, logout-all).
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=True)
 
     @property
     def role_list(self) -> list[str]:

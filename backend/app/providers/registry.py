@@ -4,7 +4,9 @@ import os
 import re
 from typing import Any
 
+from app.core.config import settings
 from app.providers.base import TargetProvider
+from app.providers.dd_power import DDPowerProvider, build_dd_config
 from app.providers.debugger import DebuggerProvider, build_debugger_provider_config
 from app.providers.deployment import DeploymentProvider, build_deployment_provider_config
 from app.providers.network import NetworkProvider, build_network_provider_config
@@ -28,6 +30,56 @@ CAPABILITY_PROVIDERS: dict[str, str] = {
 }
 
 
+# Families an Agent can execute natively (hardware attached to the Agent host).
+AGENT_FAMILIES = {"serial", "power", "deploy"}
+POWER_DRIVERS = ("dd", "http", "simulated")
+
+
+class SimulationDisabled(ValueError):
+    pass
+
+
+def simulation_allowed() -> bool:
+    return settings.simulation_enabled
+
+
+def _require_simulation(what: str) -> None:
+    if not simulation_allowed():
+        raise SimulationDisabled(
+            f"{what} would run in simulated mode, which is disabled on this server. "
+            "Configure a real driver, or set ALLOW_SIMULATED_PROVIDERS=true for demos and testing."
+        )
+
+
+def power_driver(provider_config: dict[str, Any] | None) -> str | None:
+    cfg = provider_config or {}
+    driver = str(cfg.get("driver", "")).strip().lower()
+    if driver:
+        if driver not in POWER_DRIVERS:
+            raise ValueError(f"power driver must be one of: {', '.join(POWER_DRIVERS)}")
+        return driver
+    mode = str(cfg.get("mode", "")).strip().lower()
+    if mode == "real":
+        return "http"
+    if mode == "simulated":
+        return "simulated"
+    return None
+
+
+def provider_mode(capability_type: str, provider_config: dict[str, Any] | None, agent_backed: bool) -> str:
+    """How a capability is executed: agent | dd | http | simulated."""
+    family = CAPABILITY_PROVIDERS.get(capability_type)
+    cfg = provider_config or {}
+    if agent_backed and family in AGENT_FAMILIES:
+        return "agent"
+    if family == "power":
+        return power_driver(cfg) or "unconfigured"
+    if family == "serial":
+        return "serial" if cfg.get("port") else "simulated"
+    mode = str(cfg.get("mode", "")).strip().lower()
+    return "http" if mode == "real" else ("simulated" if mode in {"", "simulated"} else mode)
+
+
 def env_prefix(provider_key: str) -> str:
     normalized = re.sub(r"[^A-Za-z0-9]+", "_", provider_key).strip("_").upper()
     return f"TARGETHUB_{normalized}"
@@ -37,7 +89,8 @@ def _build_serial(provider_key: str, provider_config: dict[str, Any]) -> TargetP
     prefix = env_prefix(provider_key)
     port = os.getenv(f"{prefix}_PORT") or provider_config.get("port")
     if not port:
-        # No physical device configured: demonstrate via simulated console.
+        # No device on the server and no Agent mapping: only a simulated console.
+        _require_simulation("This serial console has no Agent resource or server port, so it")
         return SimulatedSerialProvider(provider_key)
 
     baudrate = int(os.getenv(f"{prefix}_BAUDRATE", str(provider_config.get("baudrate", 115200))))
@@ -48,8 +101,20 @@ def _build_serial(provider_key: str, provider_config: dict[str, Any]) -> TargetP
 
 
 def _build_power(provider_key: str, provider_config: dict[str, Any]) -> TargetProvider:
-    parsed = build_power_provider_config(provider_key, provider_config)
-    return PowerProvider(parsed)
+    driver = power_driver(provider_config)
+    if driver is None:
+        raise ValueError("Power capability has no driver configured (choose DD, HTTP or map it to an Agent relay)")
+    if driver == "dd":
+        return DDPowerProvider(provider_key, build_dd_config(provider_config))
+    if driver == "simulated":
+        _require_simulation("This power capability")
+        return PowerProvider(build_power_provider_config(provider_key, {**provider_config, "mode": "simulated"}))
+    return PowerProvider(build_power_provider_config(provider_key, {**provider_config, "mode": "real"}))
+
+
+def _require_real_or_simulation(family: str, provider_config: dict[str, Any]) -> None:
+    if str(provider_config.get("mode", "simulated")).strip().lower() != "real":
+        _require_simulation(f"This {family} capability")
 
 
 def _build_network(
@@ -57,16 +122,19 @@ def _build_network(
     provider_key: str,
     provider_config: dict[str, Any],
 ) -> TargetProvider:
+    _require_real_or_simulation(capability_type, provider_config)
     parsed = build_network_provider_config(provider_key, capability_type, provider_config)
     return NetworkProvider(parsed)
 
 
 def _build_debugger(provider_key: str, provider_config: dict[str, Any]) -> TargetProvider:
+    _require_real_or_simulation("debugger", provider_config)
     parsed = build_debugger_provider_config(provider_key, provider_config)
     return DebuggerProvider(parsed)
 
 
 def _build_deployment(provider_key: str, provider_config: dict[str, Any]) -> TargetProvider:
+    _require_real_or_simulation("deploy", provider_config)
     parsed = build_deployment_provider_config(provider_key, provider_config)
     return DeploymentProvider(parsed)
 
@@ -79,12 +147,33 @@ def validate_provider_config(
     capability_type: str,
     provider_key: str | None,
     provider_config: dict[str, Any] | None,
+    agent_backed: bool = False,
 ) -> None:
+    """Reject configurations that cannot run, including implicit simulation in production."""
     family = CAPABILITY_PROVIDERS.get(capability_type)
     if family is None:
         raise ValueError(f"Unsupported capability type '{capability_type}'")
+    cfg = provider_config or {}
+    if agent_backed and family in AGENT_FAMILIES:
+        return  # executed by the Agent with its local configuration
+    mode = provider_mode(capability_type, cfg, agent_backed)
+    if mode == "simulated":
+        _require_simulation(f"This {capability_type} capability")
+    if family == "serial" and mode == "simulated":
+        return
     if family == "power":
-        build_power_provider_config(provider_key or capability_type, provider_config)
+        driver = power_driver(cfg)
+        if driver is None:
+            raise ValueError(
+                "Power capability needs a driver: map it to an Agent relay, or set provider_config.driver "
+                "to 'dd' (DD power system) or 'http'"
+            )
+        if driver == "dd":
+            build_dd_config(cfg)
+        else:
+            build_power_provider_config(
+                provider_key or capability_type, {**cfg, "mode": "real" if driver == "http" else "simulated"}
+            )
     if family == "network":
         build_network_provider_config(provider_key or capability_type, capability_type, provider_config)
     if family == "debugger":

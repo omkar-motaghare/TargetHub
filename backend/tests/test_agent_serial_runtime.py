@@ -166,3 +166,21 @@ def test_router_reports_unexpected_errors_instead_of_hanging(runtime, monkeypatc
     monkeypatch.setattr(runtime, "complete_operation", lambda config, **kwargs: calls.append(kwargs))
     runtime.run_operation({}, router, {"id": "op-1"}, 5)
     assert calls and calls[0]["success"] is False and "kaput" in calls[0]["message"]
+
+
+def test_pyserial_backend_used_on_windows_works_with_a_pty(runtime, pty_pair):
+    """The pyserial path (mandatory on Windows) exercised against a real pty."""
+    pytest.importorskip("serial")
+    assert runtime._pyserial is not None
+    master, path = pty_pair
+    serial = runtime.SerialRuntime()
+    try:
+        assert serial.execute(op(path, "s1", "open"))["success"]
+        channel = serial._channels["r1"]
+        assert type(channel.port).__name__ == "_PySerialPort"
+        assert serial.execute(op(path, "s1", "write", text="via-pyserial"))["success"]
+        assert b"via-pyserial" in os.read(master, 64)
+        os.write(master, b"answer\n")
+        assert "answer" in serial.execute(op(path, "s1", "read", wait_ms=2000))["data"]["data_text"]
+    finally:
+        serial.close_all()

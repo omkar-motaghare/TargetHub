@@ -46,6 +46,17 @@ def validate_capability_mapping_inputs(
             f"with capability '{capability_type}'"
         )
 
+    if _is_simulated_resource(resource) and not registry.simulation_allowed():
+        raise ConflictResource(
+            "Selected resource is a simulated Agent device; simulated providers are disabled on this server "
+            "(set ALLOW_SIMULATED_PROVIDERS=true for demos)"
+        )
+
+
+def _is_simulated_resource(resource) -> bool:
+    metadata = getattr(resource, "resource_metadata", None) or {}
+    return bool(metadata.get("simulated")) or str(getattr(resource, "resource_key", "")).startswith("sim://")
+
 
 def validate_capability_runtime_binding(capability, now: datetime | None = None) -> None:
     """Validate runtime readiness for session creation/execution.
@@ -54,6 +65,18 @@ def validate_capability_runtime_binding(capability, now: datetime | None = None)
     is backed by an enabled, credentialed, online Agent and an available,
     compatible resource that belongs to that Agent.
     """
+    if not capability.agent_id and not capability.resource_id:
+        # Server-hosted capability (e.g. DD power): the hub itself talks to the device.
+        try:
+            registry.validate_provider_config(
+                capability.capability_type,
+                capability.provider_key,
+                capability.provider_config or {},
+                agent_backed=False,
+            )
+        except ValueError as exc:
+            raise ConflictResource(str(exc)) from exc
+        return
     if not capability.agent_id or not capability.resource_id:
         raise ConflictResource(
             "Capability is not fully mapped to an Agent resource"

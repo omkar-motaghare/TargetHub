@@ -114,13 +114,8 @@ class ProviderGateway:
 
     @staticmethod
     def _uses_agent_transport(session) -> bool:
-        """Serial always runs on the Agent; power/deploy opt in with provider_config transport=agent."""
-        if not AgentOperationService.uses_agent_transport(session):
-            return False
-        if session.capability_type == "serial":
-            return True
-        provider_config = getattr(session, "_provider_config", None) or {}
-        return provider_config.get("transport") == "agent"
+        """Capabilities mapped to an Agent resource of an Agent family run on that Agent."""
+        return AgentOperationService.uses_agent_transport(session)
 
     def _validate_runtime_binding(self, session):
         if self.target_repository is None:
@@ -180,7 +175,7 @@ class ProviderGateway:
             provider_config = getattr(session, "_provider_config", {})
             try:
                 provider = registry.build_provider(session.capability_type, provider_key, provider_config)
-            except ValueError as exc:
+            except ValueError as exc:  # includes SimulationDisabled
                 raise ConflictResource(str(exc)) from exc
             self._providers.put(session.id, provider)
         return provider

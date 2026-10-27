@@ -188,9 +188,21 @@ def _bound_power_target(
     return FakeTarget(id=target_id, capabilities=[capability])
 
 
+def _server_hosted(target):
+    """Turn a bound fake target into a server-hosted one (no Agent mapping)."""
+    for capability in target.capabilities:
+        capability.agent_id = None
+        capability.resource_id = None
+        capability.agent = None
+        capability.resource = None
+    return target
+
+
 def test_power_operation_through_session_gateway_records_audit():
-    session = FakeSession("s1", "user1", "t1", "power", "pdu-1")
-    gateway, audit_repo = _gateway([session], [_bound_power_target()])
+    session = FakeSession("s1", "user1", "t1", "power", "pdu-1", agent_id=None, resource_id=None)
+    gateway, audit_repo = _gateway(
+        [session], [_server_hosted(_bound_power_target(provider_config={"driver": "simulated"}))]
+    )
 
     result = gateway.execute("s1", "user1", "on")
     assert result["data"]["power"] == "on"
@@ -315,7 +327,7 @@ def test_network_real_exec_through_gateway(monkeypatch):
 
 
 def test_deployment_real_timeout_through_gateway(monkeypatch):
-    session = FakeSession("s1", "user1", "t1", "deploy", "dep-1")
+    session = FakeSession("s1", "user1", "t1", "deploy", "dep-1", agent_id=None, resource_id=None)
     target = _bound_power_target(
         capability_type="deploy",
         provider_key="dep-1",
@@ -332,6 +344,7 @@ def test_deployment_real_timeout_through_gateway(monkeypatch):
 
     monkeypatch.setattr("urllib.request.urlopen", _timeout)
 
+    target = _server_hosted(target)
     gateway, _ = _gateway([session], [target])
     with pytest.raises(ConflictResource, match="timed out"):
         gateway.execute("s1", "user1", "status")

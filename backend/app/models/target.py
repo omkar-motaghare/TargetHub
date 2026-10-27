@@ -5,6 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.models.base import Base
+from app.models.types import UTCDateTime
 
 
 class Target(Base):
@@ -57,12 +58,12 @@ class Target(Base):
     )
 
     created_at: Mapped[DateTime] = mapped_column(
-        DateTime(timezone=True),
+        UTCDateTime(),
         server_default=func.now(),
     )
 
     updated_at: Mapped[DateTime] = mapped_column(
-        DateTime(timezone=True),
+        UTCDateTime(),
         server_default=func.now(),
         onupdate=func.now(),
     )

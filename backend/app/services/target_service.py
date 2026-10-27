@@ -44,6 +44,7 @@ class TargetService:
                 capability["capability_type"],
                 capability.get("provider_key"),
                 capability.get("provider_config", {}),
+                agent_backed=bool(capability.get("agent_id") and capability.get("resource_id")),
             )
         except ValueError as exc:
             raise ConflictResource(str(exc)) from exc

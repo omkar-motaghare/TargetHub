@@ -1,11 +1,12 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, false
+from sqlalchemy import JSON, Boolean, ForeignKey, String, Text, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.models.base import Base
+from app.models.types import UTCDateTime
 
 
 class AgentOperation(Base):
@@ -45,10 +46,10 @@ class AgentOperation(Base):
     detached: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
     detail: Mapped[str | None] = mapped_column(Text)
     result_data: Mapped[dict | None] = mapped_column(JSON)
-    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    requested_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), nullable=False)
+    dispatched_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    lease_expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
     agent = relationship("Agent")
     session = relationship("TargetSession")

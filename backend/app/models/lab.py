@@ -3,11 +3,12 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
 from app.models.base import Base
+from app.models.types import UTCDateTime
 
 
 class AppSetting(Base):
@@ -17,7 +18,7 @@ class AppSetting(Base):
     value: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     updated_by: Mapped[str | None] = mapped_column(String(100))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        UTCDateTime(), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
 
@@ -37,9 +38,9 @@ class WaitlistEntry(Base):
     # waiting -> fulfilled | cancelled | expired
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="waiting", index=True)
     reservation_id: Mapped[str | None] = mapped_column(String(36))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    fulfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    fulfilled_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
 
 class Notification(Base):
@@ -52,6 +53,6 @@ class Notification(Base):
     target_id: Mapped[str | None] = mapped_column(String(36))
     reservation_id: Mapped[str | None] = mapped_column(String(36))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+        UTCDateTime(), server_default=func.now(), nullable=False, index=True
     )
-    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    read_at: Mapped[datetime | None] = mapped_column(UTCDateTime())

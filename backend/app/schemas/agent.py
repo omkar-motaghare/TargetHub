@@ -52,6 +52,7 @@ class AgentEnrollmentResponse(BaseModel):
     token: str | None = None
     targethub_url: str | None = None
     install_command: str | None = None
+    install_command_windows: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

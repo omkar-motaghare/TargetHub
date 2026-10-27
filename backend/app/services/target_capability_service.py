@@ -82,6 +82,7 @@ class TargetCapabilityService:
                 kwargs["capability_type"],
                 kwargs.get("provider_key"),
                 kwargs.get("provider_config", {}),
+                agent_backed=bool(kwargs.get("agent_id") and kwargs.get("resource_id")),
             )
         except ValueError as exc:
             raise ConflictResource(str(exc)) from exc
@@ -110,6 +111,7 @@ class TargetCapabilityService:
                 next_capability_type,
                 next_provider_key,
                 next_provider_config,
+                agent_backed=bool(next_agent_id and next_resource_id),
             )
         except ValueError as exc:
             raise ConflictResource(str(exc)) from exc

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.models.base import Base
+from app.models.types import UTCDateTime
 
 
 class TargetCapability(Base):
@@ -24,8 +25,8 @@ class TargetCapability(Base):
     provider_key: Mapped[str | None] = mapped_column(String(100))
     provider_config: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[DateTime] = mapped_column(UTCDateTime(), server_default=func.now())
+    updated_at: Mapped[DateTime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
     target = relationship("Target", back_populates="capabilities")
     agent = relationship("Agent")

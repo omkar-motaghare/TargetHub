@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     password_hash_iterations: int = 600_000
     refresh_token_hours: int = 168
 
+    # Simulated providers (fake power/serial/etc.). Unset: allowed only in development/test.
+    allow_simulated_providers: bool | None = None
+
+    @property
+    def simulation_enabled(self) -> bool:
+        if self.allow_simulated_providers is not None:
+            return self.allow_simulated_providers
+        return self.environment.lower() in DEV_ENVIRONMENTS
+
     # Background lab maintenance (expiry, warnings, waitlist, retention).
     scheduler_enabled: bool = True
     scheduler_interval_seconds: int = 30
