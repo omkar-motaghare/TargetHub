@@ -1,7 +1,10 @@
 #!/usr/bin/env sh
 set -e
 
-# Run migrations then start the API with Gunicorn+Uvicorn workers.
+# Wait for the database, run migrations, then start Gunicorn+Uvicorn workers.
+echo "Waiting for database..."
+PYTHONPATH=/app python entrypoints/wait_for_db.py
+
 echo "Running alembic migrations..."
 alembic upgrade heads
 

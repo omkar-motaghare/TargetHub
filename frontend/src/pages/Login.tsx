@@ -1,8 +1,8 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import ChangePasswordForm from '../components/ChangePasswordForm'
-import { ApiError } from '../services/api'
+import { ApiError, getSetupStatus } from '../services/api'
 import { useAuth } from '../services/auth'
 import { errorMessage } from '../utils/ui'
 
@@ -15,6 +15,18 @@ export default function Login() {
   const [message, setMessage] = useState<string | null>(null)
   const [showChangePassword, setShowChangePassword] = useState(false)
   const [changeSuccess, setChangeSuccess] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    getSetupStatus()
+      .then((status) => {
+        if (!cancelled && status.setup_required) nav('/setup', { replace: true })
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [nav])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()

@@ -30,26 +30,19 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///targethub.db"
 
-    # Redis (cache + broker for Celery)
-    redis_url: str = "redis://redis:6379/0"
-
-    # Celery broker (alias of redis_url by default)
-    broker_url: str | None = None
-
-    # MinIO / S3-compatible object storage (optional)
-    minio_endpoint: str = "minio:9000"
-    minio_access_key: str | None = None
-    minio_secret_key: str | None = None
-
     secret_key: str
     targethub_public_url: str = "http://localhost:8000"
 
     # One-time first-admin bootstrap. Unset/empty disables bootstrap entirely.
     admin_bootstrap_token: str | None = None
 
+    # Bearer token for Prometheus scrapes of /metrics. Admin JWTs are also accepted.
+    metrics_token: str | None = None
+
     # Failed logins / password changes allowed per client IP + username within the window.
     auth_max_failures: int = 5
     auth_failure_window_seconds: int = 300
+
     @model_validator(mode="after")
     def reject_weak_secret_key(self) -> "Settings":
         if self.environment.lower() in DEV_ENVIRONMENTS:

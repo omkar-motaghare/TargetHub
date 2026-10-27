@@ -25,6 +25,15 @@ def get_auth_service(db: Annotated[Session, Depends(get_db)]) -> AuthService:
     return AuthService(db)
 
 
+@router.get("/setup-status")
+def setup_status(auth: AuthService = Depends(get_auth_service)):
+    """Public, secret-free first-run probe: does the instance still need its first admin?"""
+    return {
+        "setup_required": auth.can_bootstrap(),
+        "bootstrap_enabled": bool(settings.admin_bootstrap_token),
+    }
+
+
 @router.post("/token", response_model=Token)
 def login_for_access_token(
     request: Request,

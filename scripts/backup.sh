@@ -1,17 +1,33 @@
 #!/usr/bin/env bash
-# Back up the TargetHub database (SQLite online backup or PostgreSQL pg_dump).
-# Usage: DATABASE_URL=... scripts/backup.sh [output-dir]
+# Back up the TargetHub database.
+# Compose stack (default): scripts/backup.sh [output-dir]
+#   runs pg_dump inside the stack's `db` container (no host PostgreSQL client needed);
+#   the stack is selected by .env / COMPOSE_PROJECT_NAME in the repository root.
+# Direct database: DATABASE_URL=... scripts/backup.sh [output-dir]  (SQLite or host pg_dump)
 # Writes targethub-<UTC timestamp>.{sqlite3,dump} (mode 0600) plus a .sha256 file.
 set -euo pipefail
 
-: "${DATABASE_URL:?set DATABASE_URL}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${1:-backups}"
 PY="${PYTHON:-python3}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 umask 077
 mkdir -p "$OUT_DIR"
 
+if [ -z "${DATABASE_URL:-}" ]; then
+  DATABASE_URL=compose
+fi
+
 case "$DATABASE_URL" in
+  compose)
+    DEST="$OUT_DIR/targethub-$STAMP.dump"
+    if ! (cd "$ROOT" && docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner') >"$DEST.partial"; then
+      rm -f "$DEST.partial"
+      echo "pg_dump failed (is the stack running? check COMPOSE_PROJECT_NAME)" >&2
+      exit 1
+    fi
+    mv "$DEST.partial" "$DEST"
+    ;;
   sqlite:///*)
     DEST="$OUT_DIR/targethub-$STAMP.sqlite3"
     "$PY" - "${DATABASE_URL#sqlite:///}" "$DEST" <<'PYEOF'

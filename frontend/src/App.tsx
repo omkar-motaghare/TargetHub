@@ -6,6 +6,7 @@ import Login from './pages/Login'
 import MyReservations from './pages/MyReservations'
 import SessionWorkspace from './pages/SessionWorkspace'
 import Sessions from './pages/Sessions'
+import Setup from './pages/Setup'
 import AdminDashboard from './pages/Admin/Dashboard'
 import Targets from './pages/Targets'
 import { AuthProvider, useAuth } from './services/auth'
@@ -81,6 +82,7 @@ function AppFrame() {
       <main className="container page-space">
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/setup" element={<Setup />} />
           <Route
             path="/change-password"
             element={

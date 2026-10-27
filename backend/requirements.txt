@@ -8,6 +8,4 @@ pydantic-settings
 python-dotenv
 loguru
 pyserial
-celery
-redis
 gunicorn

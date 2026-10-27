@@ -13,7 +13,9 @@ vi.mock('./services/auth', () => ({
   AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useAuth: () => ({ ...authState.value, logout: vi.fn(), login: vi.fn() }),
 }))
-vi.mock('./services/api')
+vi.mock('./services/api', () => ({
+  getSetupStatus: vi.fn().mockResolvedValue({ setup_required: false, bootstrap_enabled: false }),
+}))
 
 function renderAt(path: string) {
   return render(

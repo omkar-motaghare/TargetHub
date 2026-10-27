@@ -679,7 +679,7 @@ def test_log_lines_carry_the_request_id(client):
     records = []
     sink_id = logger.add(lambda message: records.append(message.record), level="INFO")
     try:
-        client.get("/health", headers={"X-Request-ID": "trace-log-12345"})
+        client.get("/api/v1/auth/setup-status", headers={"X-Request-ID": "trace-log-12345"})
     finally:
         logger.remove(sink_id)
 
@@ -688,10 +688,60 @@ def test_log_lines_carry_the_request_id(client):
     assert any(r["message"].startswith("<--") for r in request_lines)
 
 
-def test_metrics_count_requests(client):
+def test_metrics_require_token_or_admin(client, admin_token, monkeypatch):
+    monkeypatch.setattr(settings, "metrics_token", "scrape-token")
     client.get("/health")
-    body = client.get("/metrics").text
-    assert 'targethub_http_requests_total{method="GET",status="200"}' in body
+
+    assert client.get("/metrics").status_code == 401
+    assert client.get("/metrics", headers=auth_headers("garbage")).status_code == 401
+    assert client.get("/metrics", headers=auth_headers("wrong-token")).status_code == 401
+
+    scraped = client.get("/metrics", headers=auth_headers("scrape-token"))
+    assert scraped.status_code == 200
+    assert 'targethub_http_requests_total{method="GET",status="200"}' in scraped.text
+    assert client.get("/metrics", headers=auth_headers(admin_token)).status_code == 200
+
+
+def test_metrics_reject_non_admin_and_unset_token(client, admin_token, monkeypatch):
+    monkeypatch.setattr(settings, "metrics_token", None)
+    created = client.post(
+        "/api/v1/auth/users",
+        json={"username": "bob", "password": "bob-password-123", "roles": ["user"]},
+        headers=auth_headers(admin_token),
+    )
+    assert created.status_code == 200, created.text
+    bob_token = login(client, "bob", "bob-password-123")
+
+    assert client.get("/metrics", headers=auth_headers(bob_token)).status_code == 401
+    assert client.get("/metrics", headers=auth_headers("")).status_code == 401
+
+
+def test_health_live_and_ready_are_public(client):
+    assert client.get("/health/live").json() == {"status": "ok"}
+    ready = client.get("/health/ready")
+    assert ready.status_code == 200
+    assert ready.json()["status"] == "ready"
+
+
+def test_responses_carry_security_headers(client):
+    response = client.get("/health/live")
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["X-Frame-Options"] == "DENY"
+
+
+def test_setup_status_flips_after_bootstrap(client):
+    assert client.get("/api/v1/auth/setup-status").json() == {
+        "setup_required": True,
+        "bootstrap_enabled": True,
+    }
+    assert bootstrap_admin(client).status_code == 201
+    assert client.get("/api/v1/auth/setup-status").json()["setup_required"] is False
+
+
+def test_setup_status_reports_disabled_bootstrap(client, monkeypatch):
+    monkeypatch.setattr(settings, "admin_bootstrap_token", None)
+    body = client.get("/api/v1/auth/setup-status").json()
+    assert body == {"setup_required": True, "bootstrap_enabled": False}
 
 
 def test_audit_filters_by_user_target_session_and_action(client, admin_token):

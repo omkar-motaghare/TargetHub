@@ -1,10 +1,13 @@
+import hmac
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
+from app.api.dependencies import bearer, get_auth_service, is_admin_user
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.exceptions import TargetHubException
@@ -13,6 +16,7 @@ from app.core.logging import logger
 from app.core.metrics import metrics
 from app.core.middleware import RequestMiddleware
 from app.db.session import SessionLocal
+from app.services.auth_service import AuthService
 
 logger.info("Starting TargetHub...")
 
@@ -56,12 +60,13 @@ async def root():
 
 
 @app.get("/health", include_in_schema=False)
-async def health():
+@app.get("/health/live", include_in_schema=False)
+async def health_live():
     return {"status": "ok"}
 
 
 @app.get("/health/ready", include_in_schema=False)
-async def health_ready():
+def health_ready():
     try:
         db = SessionLocal()
         try:
@@ -74,7 +79,31 @@ async def health_ready():
         return PlainTextResponse("not ready", status_code=503)
 
 
-@app.get("/metrics", include_in_schema=False)
+def require_metrics_access(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+    auth: AuthService = Depends(get_auth_service),
+) -> None:
+    """Allow the METRICS_TOKEN bearer or an admin JWT; everything else is 401."""
+    unauthorized = HTTPException(
+        status_code=401,
+        detail="Metrics require a bearer token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    if not credentials or credentials.scheme.lower() != "bearer":
+        raise unauthorized
+    expected = settings.metrics_token
+    if expected and hmac.compare_digest(credentials.credentials, expected):
+        return
+    try:
+        payload = auth.verify_token(credentials.credentials)
+    except Exception:
+        raise unauthorized
+    user = auth.repo.get_by_username(payload.get("sub", ""))
+    if not user or not is_admin_user(user):
+        raise unauthorized
+
+
+@app.get("/metrics", include_in_schema=False, dependencies=[Depends(require_metrics_access)])
 async def prometheus_metrics():
     return PlainTextResponse(metrics.render(), media_type="text/plain; version=0.0.4")
 

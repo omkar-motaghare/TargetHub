@@ -178,6 +178,25 @@ export async function login(username: string, password: string): Promise<string>
   return payload.access_token
 }
 
+export async function getSetupStatus(): Promise<{ setup_required: boolean; bootstrap_enabled: boolean }> {
+  return request('/auth/setup-status', { method: 'GET' }, 'Failed to check setup status')
+}
+
+export async function bootstrapAdmin(input: {
+  username: string
+  password: string
+  bootstrap_token: string
+}): Promise<void> {
+  await request(
+    '/auth/bootstrap',
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+    'Failed to create the admin account',
+  )
+}
+
 export async function changePassword(input: {
   username: string
   current_password: string
