@@ -12,29 +12,29 @@ function clientWith(handler: (url: string, init: RequestInit) => Response, token
 }
 
 describe('HubClient', () => {
-  it('logs in with a form post and keeps the token for later calls', async () => {
-    const { hub, fetchMock } = clientWith(
-      (url) => (url.endsWith('/auth/token') ? respond({ access_token: 'jwt' }) : respond([])),
-      '',
-    )
-    expect(await hub.login('alice', 'pw')).toBe('jwt')
+  it('signs in, swaps the short access token for a personal API token and uses it', async () => {
+    const { hub, fetchMock } = clientWith((url) => {
+      if (url.endsWith('/auth/token')) return respond({ access_token: 'jwt' })
+      if (url.endsWith('/auth/api-tokens')) return respond({ token: 'thp_long' }, 201)
+      return respond([])
+    }, '')
+    expect(await hub.login('alice', 'pw')).toBe('thp_long')
     await hub.listTargets()
 
     const [, loginInit] = fetchMock.mock.calls[0]
     expect(String(loginInit?.body)).toBe('username=alice&password=pw&grant_type=')
-    const [listUrl, listInit] = fetchMock.mock.calls[1]
+    expect((fetchMock.mock.calls[1][1]?.headers as Record<string, string>).Authorization).toBe('Bearer jwt')
+    const [listUrl, listInit] = fetchMock.mock.calls[2]
     expect(listUrl).toBe('http://hub.test/api/v1/targets')
-    expect((listInit?.headers as Record<string, string>).Authorization).toBe('Bearer jwt')
+    expect((listInit?.headers as Record<string, string>).Authorization).toBe('Bearer thp_long')
   })
 
-  it('reserves using the authenticated username and a bounded window', async () => {
-    const { hub, fetchMock } = clientWith((url) =>
-      url.endsWith('/auth/me') ? respond({ username: 'alice' }) : respond({ id: 'r1' }),
-    )
+  it('reserves a bounded window as the token owner', async () => {
+    const { hub, fetchMock } = clientWith(() => respond({ id: 'r1' }))
     await hub.reserve('t1', 30)
 
-    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body))
-    expect(body.user_id).toBe('alice')
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
+    expect(body.user_id).toBeUndefined()
     expect(body.target_id).toBe('t1')
     expect(new Date(body.ends_at).getTime() - new Date(body.starts_at).getTime()).toBe(30 * 60_000)
   })
@@ -70,5 +70,21 @@ describe('HubClient', () => {
     expect(error).toBeInstanceOf(HubError)
     expect((error as HubError).status).toBe(0)
     expect((error as HubError).message).toContain('ECONNREFUSED')
+  })
+})
+
+describe('HubClient serial and reservations', () => {
+  it('uses long reads so console output arrives as soon as it is printed', async () => {
+    const { hub, fetchMock } = clientWith(() => respond({ data: { data_text: 'x' } }))
+    await hub.serialRead('s1')
+    expect(String(fetchMock.mock.calls[0][0])).toContain('wait_ms=2000')
+  })
+
+  it('extends and reserves by tag', async () => {
+    const { hub, fetchMock } = clientWith(() => respond({ id: 'r1' }))
+    await hub.extend('r1', 30)
+    await hub.reserveAny('nucleo', 60)
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ extend_minutes: 30 })
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/reservations/any')
   })
 })

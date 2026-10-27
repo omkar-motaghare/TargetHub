@@ -2,21 +2,56 @@
   "name": "targethub-vscode",
   "displayName": "TargetHub",
   "description": "Reserve lab targets, control power and open serial consoles from VS Code",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "targethub",
   "license": "Apache-2.0",
   "private": true,
-  "engines": { "vscode": "^1.85.0" },
-  "categories": ["Other"],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
-      { "command": "targethub.login", "title": "TargetHub: Sign In" },
-      { "command": "targethub.reserve", "title": "TargetHub: Reserve Target" },
-      { "command": "targethub.power", "title": "TargetHub: Power Control" },
-      { "command": "targethub.serial", "title": "TargetHub: Open Serial Console" },
-      { "command": "targethub.release", "title": "TargetHub: Release Reservation" }
+      {
+        "command": "targethub.login",
+        "title": "TargetHub: Sign In"
+      },
+      {
+        "command": "targethub.useToken",
+        "title": "TargetHub: Sign In with API Token"
+      },
+      {
+        "command": "targethub.logout",
+        "title": "TargetHub: Sign Out"
+      },
+      {
+        "command": "targethub.reserve",
+        "title": "TargetHub: Reserve Target"
+      },
+      {
+        "command": "targethub.reserveTag",
+        "title": "TargetHub: Reserve Any Target by Tag"
+      },
+      {
+        "command": "targethub.extend",
+        "title": "TargetHub: Extend Reservation"
+      },
+      {
+        "command": "targethub.power",
+        "title": "TargetHub: Power Control"
+      },
+      {
+        "command": "targethub.serial",
+        "title": "TargetHub: Open Serial Console"
+      },
+      {
+        "command": "targethub.release",
+        "title": "TargetHub: Release Reservation"
+      }
     ],
     "configuration": {
       "title": "TargetHub",
@@ -37,6 +72,6 @@
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
     "typescript": "^5.4.5",
-    "vitest": "^2.1.9"
+    "vitest": "^4.1.12"
   }
 }

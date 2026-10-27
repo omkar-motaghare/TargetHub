@@ -3,7 +3,7 @@ import * as vscode from 'vscode'
 import { HubClient, HubError } from './client'
 
 const TOKEN_KEY = 'targethub.token'
-const SERIAL_POLL_MS = 1000
+const DURATIONS = ['30', '60', '120', '240']
 
 async function client(context: vscode.ExtensionContext): Promise<HubClient> {
   const url = vscode.workspace.getConfiguration('targethub').get<string>('url', 'http://127.0.0.1:8000')
@@ -20,7 +20,7 @@ async function guarded(action: () => Promise<void>): Promise<void> {
   }
 }
 
-async function pick<T extends { label: string }>(items: T[], placeHolder: string): Promise<T | undefined> {
+async function pick<T extends vscode.QuickPickItem>(items: T[], placeHolder: string): Promise<T | undefined> {
   if (items.length === 0) {
     void vscode.window.showInformationMessage(`TargetHub: nothing to choose (${placeHolder})`)
     return undefined
@@ -28,44 +28,46 @@ async function pick<T extends { label: string }>(items: T[], placeHolder: string
   return vscode.window.showQuickPick(items, { placeHolder })
 }
 
-function serialTerminal(hub: HubClient, sessionId: string, name: string): vscode.Pseudoterminal {
+async function askMinutes(): Promise<number | undefined> {
+  const choice = await vscode.window.showQuickPick(DURATIONS.map((value) => `${value} minutes`), { placeHolder: 'Duration' })
+  return choice ? Number.parseInt(choice, 10) : undefined
+}
+
+/** Raw-keystroke console: keys go straight to the device, output arrives via long reads. */
+export function serialTerminal(hub: HubClient, sessionId: string, name: string): vscode.Pseudoterminal {
   const output = new vscode.EventEmitter<string>()
-  let timer: NodeJS.Timeout | undefined
-  let line = ''
+  let running = false
+  const pump = async () => {
+    while (running) {
+      try {
+        const text = await hub.serialRead(sessionId)
+        if (text) output.fire(text)
+      } catch (error) {
+        output.fire(`\r\n[${name}] ${error instanceof HubError ? error.message : String(error)}\r\n`)
+        if (error instanceof HubError && error.status === 409) {
+          running = false
+          return
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+      }
+    }
+  }
   return {
     onDidWrite: output.event,
     open: () => {
       void hub.execute(sessionId, 'open').then(
         () => {
-          timer = setInterval(() => {
-            hub.serialRead(sessionId).then(
-              (text) => text && output.fire(text.replace(/\r?\n/g, '\r\n')),
-              (error: unknown) => output.fire(`\r\n[${name}] read failed: ${String(error)}\r\n`),
-            )
-          }, SERIAL_POLL_MS)
+          running = true
+          void pump()
         },
         (error: unknown) => output.fire(`[${name}] open failed: ${String(error)}\r\n`),
       )
     },
     close: () => {
-      if (timer) clearInterval(timer)
+      running = false
     },
     handleInput: (data: string) => {
-      for (const char of data) {
-        if (char === '\r') {
-          output.fire('\r\n')
-          hub.serialWrite(sessionId, `${line}\n`).catch((error: unknown) =>
-            output.fire(`[${name}] write failed: ${String(error)}\r\n`),
-          )
-          line = ''
-        } else if (char === '\u007f') {
-          line = line.slice(0, -1)
-          output.fire('\b \b')
-        } else {
-          line += char
-          output.fire(char)
-        }
-      }
+      hub.serialWrite(sessionId, data).catch((error: unknown) => output.fire(`\r\n[${name}] write failed: ${String(error)}\r\n`))
     },
   }
 }
@@ -79,49 +81,115 @@ export function activate(context: vscode.ExtensionContext): void {
     const password = username ? await vscode.window.showInputBox({ prompt: 'Password', password: true }) : undefined
     if (!username || !password) return
     const hub = await client(context)
-    await context.secrets.store(TOKEN_KEY, await hub.login(username, password))
+    await context.secrets.store(TOKEN_KEY, await hub.login(username, password, `vscode@${vscode.env.machineId.slice(0, 8)}`))
     void vscode.window.showInformationMessage(`TargetHub: signed in as ${username}`)
+  })
+
+  register('targethub.useToken', async () => {
+    const token = await vscode.window.showInputBox({ prompt: 'Personal API token (Account → API tokens)', password: true })
+    if (!token) return
+    await context.secrets.store(TOKEN_KEY, token.trim())
+    const hub = await client(context)
+    void vscode.window.showInformationMessage(`TargetHub: signed in as ${await hub.username()}`)
+  })
+
+  register('targethub.logout', async () => {
+    await context.secrets.delete(TOKEN_KEY)
+    void vscode.window.showInformationMessage('TargetHub: signed out (revoke the token under Account → API tokens if needed)')
   })
 
   register('targethub.reserve', async () => {
     const hub = await client(context)
     const targets = (await hub.listTargets()).filter((t) => t.enabled)
-    const chosen = await pick(targets.map((t) => ({ label: t.name, id: t.id })), 'Target to reserve')
+    const chosen = await pick(
+      targets.map((t) => ({
+        label: t.name,
+        description: t.availability?.state ?? '',
+        detail: t.availability?.reserved_by ? `reserved by ${t.availability.reserved_by}` : undefined,
+        id: t.id,
+      })),
+      'Target to reserve',
+    )
     if (!chosen) return
-    const reservation = await hub.reserve(chosen.id, 60)
-    void vscode.window.showInformationMessage(`TargetHub: reserved ${chosen.label} (${reservation.id}) for 60 minutes`)
+    const minutes = await askMinutes()
+    if (!minutes) return
+    await hub.reserve(chosen.id, minutes)
+    void vscode.window.showInformationMessage(`TargetHub: reserved ${chosen.label} for ${minutes} minutes`)
+  })
+
+  register('targethub.reserveTag', async () => {
+    const hub = await client(context)
+    const tags = [...new Set((await hub.listTargets()).flatMap((t) => t.tags ?? []))].sort()
+    const tag = await pick(tags.map((label) => ({ label })), 'Reserve any free target with tag')
+    if (!tag) return
+    const minutes = await askMinutes()
+    if (!minutes) return
+    const reservation = await hub.reserveAny(tag.label, minutes)
+    const target = (await hub.listTargets()).find((t) => t.id === reservation.target_id)
+    void vscode.window.showInformationMessage(`TargetHub: reserved ${target?.name ?? reservation.target_id} for ${minutes} minutes`)
+  })
+
+  const pickReservation = async (hub: HubClient, placeHolder: string) => {
+    const names = Object.fromEntries((await hub.listTargets()).map((t) => [t.id, t.name]))
+    return pick(
+      (await hub.myReservations()).map((r) => ({
+        label: names[r.target_id] ?? r.target_id,
+        description: r.ends_at ? `until ${new Date(r.ends_at).toLocaleTimeString()}` : '',
+        id: r.id,
+      })),
+      placeHolder,
+    )
+  }
+
+  register('targethub.extend', async () => {
+    const hub = await client(context)
+    const chosen = await pickReservation(hub, 'Reservation to extend')
+    if (!chosen) return
+    const minutes = await askMinutes()
+    if (!minutes) return
+    const updated = await hub.extend(chosen.id, minutes)
+    void vscode.window.showInformationMessage(
+      `TargetHub: ${chosen.label} extended until ${updated.ends_at ? new Date(updated.ends_at).toLocaleTimeString() : '?'}`,
+    )
   })
 
   register('targethub.release', async () => {
     const hub = await client(context)
-    const chosen = await pick(
-      (await hub.myReservations()).map((r) => ({ label: r.target_id, description: r.id, id: r.id })),
-      'Reservation to release',
-    )
-    if (chosen) await hub.release(chosen.id)
+    const chosen = await pickReservation(hub, 'Reservation to release')
+    if (chosen) {
+      await hub.release(chosen.id)
+      void vscode.window.showInformationMessage(`TargetHub: released ${chosen.label}`)
+    }
   })
+
+  const sessionFor = async (hub: HubClient, capability: string) => {
+    const names = Object.fromEntries((await hub.listTargets()).map((t) => [t.id, t.name]))
+    const existing = await hub.activeSessions(capability)
+    if (existing.length) {
+      return pick(existing.map((s) => ({ label: names[s.target_id] ?? s.target_id, id: s.id })), `${capability} session`)
+    }
+    const reservation = await pickReservation(hub, `Reservation to open a ${capability} session on`)
+    if (!reservation) return undefined
+    const session = await hub.openSession(reservation.id, capability)
+    return { label: reservation.label, id: session.id }
+  }
 
   register('targethub.power', async () => {
     const hub = await client(context)
-    const session = await pick(
-      (await hub.activeSessions('power')).map((s) => ({ label: `Target ${s.target_id}`, id: s.id })),
-      'Power session',
-    )
+    const session = await sessionFor(hub, 'power')
     if (!session) return
-    const operation = await vscode.window.showQuickPick(['on', 'off', 'status', 'cycle', 'reset'], {
-      placeHolder: 'Operation',
-    })
+    const operation = await vscode.window.showQuickPick(['on', 'off', 'status', 'cycle', 'reset'], { placeHolder: 'Operation' })
     if (!operation) return
-    const result = await hub.execute(session.id, operation)
-    void vscode.window.showInformationMessage(`TargetHub: ${result.message}`)
+    const result = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: `TargetHub: power ${operation}…` },
+      () => hub.execute(session.id, operation),
+    )
+    void vscode.window.showInformationMessage(`TargetHub: ${session.label}: ${result.message}`)
   })
 
   register('targethub.serial', async () => {
     const hub = await client(context)
-    const session = await pick(
-      (await hub.activeSessions('serial')).map((s) => ({ label: `Target ${s.target_id}`, id: s.id })),
-      'Serial session',
-    )
+    const session = await sessionFor(hub, 'serial')
     if (!session) return
     const name = `TargetHub ${session.label}`
     vscode.window.createTerminal({ name, pty: serialTerminal(hub, session.id, name) }).show()

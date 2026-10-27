@@ -69,6 +69,15 @@ def join_waitlist(request: WaitlistJoin, db: DB, user=Depends(require_operator))
     return _present(service, entry)
 
 
+@router.get("/waitlist/{entry_id}", response_model=WaitlistResponse)
+def get_waitlist_entry(entry_id: str, db: DB, user=Depends(get_current_user)):
+    """One entry in any state (lets clients see when it was fulfilled)."""
+    entry = db.get(WaitlistEntry, entry_id)
+    if entry is None or (entry.user_id != user.username and not is_admin_user(user)):
+        raise HTTPException(status_code=404, detail=f"Waitlist entry '{entry_id}' not found")
+    return _present(WaitlistService(db), entry)
+
+
 @router.delete("/waitlist/{entry_id}", response_model=WaitlistResponse)
 def leave_waitlist(entry_id: str, db: DB, user=Depends(get_current_user)):
     service = WaitlistService(db)

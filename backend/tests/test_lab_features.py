@@ -249,3 +249,16 @@ def test_api_timestamps_always_carry_utc_offset(tmp_path, monkeypatch):
             assert parsed.utcoffset() == timedelta(0), value
         listed = client.get("/api/v1/reservations", headers=auth(admin)).json()[0]
         assert datetime.fromisoformat(listed["ends_at"].replace("Z", "+00:00")).tzinfo is not None
+
+
+def test_waitlist_entry_lookup_shows_fulfilment(tmp_path, monkeypatch):
+    with api_client(tmp_path, monkeypatch) as (client, _db):
+        admin = bootstrap(client)
+        alice, bob = create_user(client, admin, "alice"), create_user(client, admin, "bob")
+        board = _target(client, admin, "B1")
+        held = reserve(client, alice, board["id"])
+        entry = client.post("/api/v1/waitlist", json={"target_id": board["id"], "duration_minutes": 30}, headers=auth(bob)).json()
+        assert client.get(f"/api/v1/waitlist/{entry['id']}", headers=auth(alice)).status_code == 404
+        client.post(f"/api/v1/reservations/{held['id']}/release", headers=auth(alice))
+        looked_up = client.get(f"/api/v1/waitlist/{entry['id']}", headers=auth(bob)).json()
+        assert looked_up["status"] == "fulfilled" and looked_up["reservation_id"]
