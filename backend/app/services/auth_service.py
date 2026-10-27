@@ -4,7 +4,7 @@ import hmac
 import json
 import secrets
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -67,7 +67,7 @@ class AuthService:
         u.username = username
         u.password_hash = self._hash_password(password)
         u.roles = ",".join(roles)
-        u.created_at = datetime.utcnow()
+        u.created_at = datetime.now(UTC)
         return self.repo.create(u)
 
     def list_users(self) -> list[User]:
@@ -136,7 +136,7 @@ class AuthService:
         user.username = username
         user.password_hash = self._hash_password(password)
         user.roles = "admin"
-        user.created_at = datetime.utcnow()
+        user.created_at = datetime.now(UTC)
         return self.repo.create(user)
 
     # Minimal JWT implementation (HS256)

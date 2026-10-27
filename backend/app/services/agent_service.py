@@ -146,10 +146,19 @@ class AgentService:
             Agent(name=name, hostname=hostname, status="online", last_seen_at=self._now())
         )
 
-    def heartbeat(self, agent: Agent, hostname: str | None, resources):
+    def heartbeat(
+        self,
+        agent: Agent,
+        hostname: str | None,
+        resources,
+        agent_version: str | None = None,
+        platform: str | None = None,
+    ):
         if not agent.enabled:
             raise ConflictResource("Agent is disabled")
         agent.hostname = hostname or agent.hostname
+        agent.agent_version = agent_version or agent.agent_version
+        agent.platform = platform or agent.platform
         agent.status = "online"
         agent.last_seen_at = self._now()
 

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -41,6 +41,8 @@ class AgentOperation(Base):
     params: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
     requested_by: Mapped[str | None] = mapped_column(String(100))
+    # Detached operations are not awaited by an API request (async submit or cleanup).
+    detached: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
     detail: Mapped[str | None] = mapped_column(Text)
     result_data: Mapped[dict | None] = mapped_column(JSON)
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

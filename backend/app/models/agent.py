@@ -17,6 +17,8 @@ class Agent(Base):
     status: Mapped[str] = mapped_column(String(32), default="offline", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    agent_version: Mapped[str | None] = mapped_column(String(32))
+    platform: Mapped[str | None] = mapped_column(String(32))
     credential_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
     credential_prefix: Mapped[str | None] = mapped_column(String(16))
     credential_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

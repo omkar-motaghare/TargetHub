@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.api.dependencies import get_db, require_role
 from app.core.config import settings
@@ -129,19 +130,21 @@ def heartbeat(
     service: Service,
 ):
     agent = _authenticate_agent(agent_id, credentials, service)
-    return service.heartbeat(agent, request.hostname, request.resources)
+    return service.heartbeat(
+        agent, request.hostname, request.resources, request.agent_version, request.platform
+    )
 
 
 @router.post("/{agent_id}/operations/poll", response_model=AgentOperationPollResponse)
-def poll_agent_operation(
+async def poll_agent_operation(
     agent_id: str,
     request: AgentOperationPollRequest,
     credentials: Credentials,
     service: Service,
     operations: OperationService,
 ):
-    _authenticate_agent(agent_id, credentials, service)
-    operation = operations.poll_for_agent(
+    await run_in_threadpool(_authenticate_agent, agent_id, credentials, service)
+    operation = await operations.poll_for_agent_async(
         agent_id=agent_id,
         wait_seconds=request.wait_seconds,
         lease_seconds=request.lease_seconds,

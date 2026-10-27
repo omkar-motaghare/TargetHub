@@ -1,4 +1,5 @@
 import hmac
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -18,12 +19,19 @@ from app.core.middleware import RequestMiddleware
 from app.db.session import SessionLocal
 from app.services.auth_service import AuthService
 
-logger.info("Starting TargetHub...")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    logger.info(f"Starting {settings.app_name} {settings.app_version} ({settings.environment})")
+    yield
+    logger.info("Application shutdown complete")
+
 
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
     description="Embedded Lab Orchestration Platform",
+    lifespan=lifespan,
 )
 
 app.add_middleware(RequestMiddleware)
@@ -41,17 +49,6 @@ REACT_ASSETS_DIR = REACT_DIR / "assets"
 
 if REACT_ASSETS_DIR.exists():
     app.mount("/assets", StaticFiles(directory=REACT_ASSETS_DIR), name="react-assets")
-
-
-@app.on_event("startup")
-async def startup():
-    logger.info("Database initialized")
-    logger.info("Application startup complete")
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    logger.info("Application shutdown complete")
 
 
 @app.get("/")

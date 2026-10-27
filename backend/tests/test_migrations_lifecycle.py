@@ -25,6 +25,7 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_DIR = REPO_ROOT / "backend"
 ALEMBIC_INI = BACKEND_DIR / "alembic.ini"
+EXPECTED_HEAD = "20261027_01"
 
 
 def _alembic_head() -> str:
@@ -56,7 +57,7 @@ def _run_alembic(db_url: str, *args: str) -> str:
 
 
 def test_alembic_graph_has_single_head():
-    assert _alembic_head() == "f0a1b2c3d4e5"
+    assert _alembic_head() == EXPECTED_HEAD
 
 
 def test_migrations_apply_to_empty_database_and_reach_head(tmp_path: Path):

@@ -1,6 +1,6 @@
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -72,7 +72,7 @@ def scrub(result: dict[str, Any], user) -> dict[str, Any]:
 
 
 class SerialWriteRequest(BaseModel):
-    text: str = Field(default="")
+    text: str = Field(default="", max_length=65536)
 
 
 class ExecuteRequest(BaseModel):
@@ -160,49 +160,79 @@ def session_operations(
     return scrub(gateway.operations_for(session_id, user.username), user)
 
 
+@router.get("/{session_id}/operations/{operation_id}")
+def session_operation_status(
+    session_id: str,
+    operation_id: str,
+    gateway: Gateway,
+    user=Depends(get_current_user),
+):
+    """Status/result of an operation submitted with ``wait=false``."""
+    return gateway.operation_status(
+        session_id, user.username, operation_id, is_admin=is_admin_user(user)
+    )
+
+
 @router.post("/{session_id}/execute")
-def session_execute(
+async def session_execute(
     session_id: str,
     request: ExecuteRequest,
     gateway: Gateway,
+    response: Response,
+    wait: bool = Query(
+        default=True,
+        description="false: return 202 with an operation_id immediately (Agent-backed capabilities)",
+    ),
     user=Depends(get_current_user),
 ):
-    return scrub(gateway.execute(session_id, user.username, request.operation, request.params), user)
+    result = await gateway.execute_async(
+        session_id, user.username, request.operation, request.params, detached=not wait
+    )
+    if result.get("status") == "pending":
+        response.status_code = 202
+    return scrub(result, user)
 
 
 @router.post("/{session_id}/serial/open")
-def serial_open(
+async def serial_open(
     session_id: str,
     gateway: Gateway,
     user=Depends(get_current_user),
 ):
-    return scrub(gateway.serial_open(session_id, user.username), user)
+    return scrub(await gateway.execute_async(session_id, user.username, "open"), user)
 
 
 @router.get("/{session_id}/serial/read")
-def serial_read(
+async def serial_read(
     session_id: str,
     gateway: Gateway,
     size: int = Query(default=4096, ge=1, le=65536),
+    wait_ms: int = Query(default=0, ge=0, le=5000),
     user=Depends(get_current_user),
 ):
-    return scrub(gateway.serial_read(session_id, user.username, size=size), user)
+    await gateway.execute_async(session_id, user.username, "open")
+    params = {"size": size, **({"wait_ms": wait_ms} if wait_ms else {})}
+    return scrub(await gateway.execute_async(session_id, user.username, "read", params), user)
 
 
 @router.post("/{session_id}/serial/write")
-def serial_write(
+async def serial_write(
     session_id: str,
     request: SerialWriteRequest,
     gateway: Gateway,
     user=Depends(get_current_user),
 ):
-    return scrub(gateway.serial_write(session_id, user.username, text=request.text), user)
+    await gateway.execute_async(session_id, user.username, "open")
+    return scrub(
+        await gateway.execute_async(session_id, user.username, "write", {"text": request.text}),
+        user,
+    )
 
 
 @router.post("/{session_id}/serial/close")
-def serial_close(
+async def serial_close(
     session_id: str,
     gateway: Gateway,
     user=Depends(get_current_user),
 ):
-    return scrub(gateway.serial_close(session_id, user.username), user)
+    return scrub(await gateway.execute_async(session_id, user.username, "close"), user)

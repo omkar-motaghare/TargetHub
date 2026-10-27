@@ -128,6 +128,4 @@ class SessionService:
         if session.status != "active":
             raise ConflictResource(f"Session '{session_id}' is already {session.status}")
 
-        session.status = "closed"
-        session.ended_at = datetime.now(UTC)
-        return self.repository.update(session)
+        return self.repository.close(session, datetime.now(UTC))

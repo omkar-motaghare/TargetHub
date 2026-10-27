@@ -10,7 +10,7 @@ import pytest
 from app.core.exceptions import ConflictResource, ResourceNotFound
 from app.models.audit import AuditLog
 from app.services.audit_service import AuditService
-from app.services.provider_gateway import ProviderGateway
+from app.services.provider_gateway import ProviderGateway, _ProviderCache
 
 
 @dataclass
@@ -102,6 +102,23 @@ class FakeAuditRepository:
 class FakeAgentOperationService:
     def __init__(self):
         self.calls = []
+        self.results = {}
+
+    def timeout_for(self, capability_type):
+        return 1.0
+
+    def submit_for_session(self, *, session, user_id, operation, params, detached=False):
+        op_id = f"op-{len(self.results) + 1}"
+        self.results[op_id] = self.execute_for_session(
+            session=session, user_id=user_id, operation=operation, params=params
+        )
+        return type("Queued", (), {"id": op_id})()
+
+    def _await_result(self, operation_id, timeout, family):
+        return self.results[operation_id]
+
+    async def await_result_async(self, operation_id, timeout, family):
+        return self.results[operation_id]
 
     def execute_for_session(self, *, session, user_id, operation, params):
         self.calls.append((session.id, user_id, operation, params))
@@ -122,7 +139,7 @@ class FakeAgentOperationService:
 
 
 def _gateway(sessions, targets=None, operation_service=None):
-    ProviderGateway._providers = {}
+    ProviderGateway._providers = _ProviderCache()
     audit_repo = FakeAuditRepository()
     gateway = ProviderGateway(
         FakeSessionRepository(sessions),

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import threading
+from collections import OrderedDict
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -20,6 +23,60 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+MAX_CACHED_PROVIDERS = 256
+
+
+class _ProviderCache:
+    """Bounded, thread-safe LRU of stateful hub-side providers keyed by session id."""
+
+    def __init__(self, capacity: int = MAX_CACHED_PROVIDERS) -> None:
+        self.capacity = capacity
+        self._lock = threading.Lock()
+        self._items: OrderedDict[str, TargetProvider] = OrderedDict()
+
+    def get(self, key: str) -> TargetProvider | None:
+        with self._lock:
+            provider = self._items.get(key)
+            if provider is not None:
+                self._items.move_to_end(key)
+            return provider
+
+    def put(self, key: str, provider: TargetProvider) -> None:
+        with self._lock:
+            self._items[key] = provider
+            self._items.move_to_end(key)
+            while len(self._items) > self.capacity:
+                self._items.popitem(last=False)
+
+    def pop(self, key: str, default=None):
+        with self._lock:
+            return self._items.pop(key, default)
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._items)
+
+
+@dataclass
+class PendingOperation:
+    """An Agent operation queued by ``ProviderGateway.begin`` and not yet finished."""
+
+    session: Any
+    operation: str
+    operation_id: str
+    timeout: float
+    family: str
+
+
+@dataclass
+class CompletedOperation:
+    session: Any
+    operation: str
+    message: str
+    data: dict[str, Any] | None = field(default=None)
+    success: bool = True
+
+
 class ProviderGateway:
     """Session-gated dispatch for provider operations.
 
@@ -28,7 +85,7 @@ class ProviderGateway:
     stateful transports (e.g. an open serial connection) persist across calls.
     """
 
-    _providers: dict[str, TargetProvider] = {}
+    _providers = _ProviderCache()
 
     def __init__(
         self,
@@ -108,8 +165,11 @@ class ProviderGateway:
         if provider is None:
             provider_key = session.provider_key or f"{session.capability_type}:{session.target_id}"
             provider_config = getattr(session, "_provider_config", {})
-            provider = registry.build_provider(session.capability_type, provider_key, provider_config)
-            self._providers[session.id] = provider
+            try:
+                provider = registry.build_provider(session.capability_type, provider_key, provider_config)
+            except ValueError as exc:
+                raise ConflictResource(str(exc)) from exc
+            self._providers.put(session.id, provider)
         return provider
 
     @staticmethod
@@ -138,66 +198,13 @@ class ProviderGateway:
             "operations": operations,
         }
 
-    def execute(
-        self, session_id: str, user_id: str, operation: str, params: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        session = self._get_active_session(session_id, user_id)
-        try:
-            if self._uses_agent_transport(session):
-                if operation not in AgentOperationService.operations_for_family(session.capability_type):
-                    raise ConflictResource(
-                        f"Operation '{operation}' is not supported by capability '{session.capability_type}'"
-                    )
-                if self.agent_operation_service is None:
-                    raise ConflictResource("Agent transport is not configured")
-                remote_result = self.agent_operation_service.execute_for_session(
-                    session=session,
-                    user_id=user_id,
-                    operation=operation,
-                    params=params or {},
-                )
-                result_message = remote_result.get("message", "ok")
-                result_data = remote_result.get("data")
-                result_success = True
-            else:
-                provider = self._get_provider(session)
-                if operation not in provider.operations():
-                    raise ConflictResource(
-                        f"Operation '{operation}' is not supported by capability '{session.capability_type}'"
-                    )
-                result = provider.execute(operation, params or {})
-                result_message = result.message
-                result_data = result.data
-                result_success = result.success
-        except ConflictResource as exc:
-            metrics.inc(
-                "targethub_provider_operations_total",
-                labels={
-                    "capability": session.capability_type,
-                    "operation": operation,
-                    "success": "false",
-                },
-            )
-            if self.audit_service is not None:
-                self.audit_service.record(
-                    action="provider.execute",
-                    user_id=user_id,
-                    target_id=session.target_id,
-                    session_id=session.id,
-                    provider_key=session.provider_key,
-                    capability_type=session.capability_type,
-                    operation=operation,
-                    success=False,
-                    detail=str(exc),
-                )
-            raise
-
+    def _record(self, session, user_id, operation, success, detail) -> None:
         metrics.inc(
             "targethub_provider_operations_total",
             labels={
                 "capability": session.capability_type,
                 "operation": operation,
-                "success": str(result_success).lower(),
+                "success": str(success).lower(),
             },
         )
         if self.audit_service is not None:
@@ -209,21 +216,147 @@ class ProviderGateway:
                 provider_key=session.provider_key,
                 capability_type=session.capability_type,
                 operation=operation,
-                success=result_success,
-                detail=result_message,
+                success=success,
+                detail=detail,
             )
 
-        if not result_success:
-            raise ConflictResource(result_message)
-
+    def _result(self, session, operation, message, data) -> dict[str, Any]:
         return {
             "session_id": session.id,
             "capability_type": session.capability_type,
             "provider_key": session.provider_key,
             "operation": operation,
-            "message": result_message,
-            "data": self._normalize(result_data),
+            "message": message,
+            "data": self._normalize(data),
         }
+
+    def begin(
+        self,
+        session_id: str,
+        user_id: str,
+        operation: str,
+        params: dict[str, Any] | None = None,
+        *,
+        detached: bool = False,
+    ) -> PendingOperation | CompletedOperation:
+        """Authorize and start an operation.
+
+        Hub-side providers run to completion here. Agent-backed operations are
+        queued and returned as ``PendingOperation`` for the caller to await.
+        """
+        session = self._get_active_session(session_id, user_id)
+        try:
+            if self._uses_agent_transport(session):
+                if operation not in AgentOperationService.operations_for_family(session.capability_type):
+                    raise ConflictResource(
+                        f"Operation '{operation}' is not supported by capability '{session.capability_type}'"
+                    )
+                if self.agent_operation_service is None:
+                    raise ConflictResource("Agent transport is not configured")
+                queued = self.agent_operation_service.submit_for_session(
+                    session=session,
+                    user_id=user_id,
+                    operation=operation,
+                    params=params or {},
+                    detached=detached,
+                )
+                return PendingOperation(
+                    session=session,
+                    operation=operation,
+                    operation_id=queued.id,
+                    timeout=self.agent_operation_service.timeout_for(session.capability_type),
+                    family=AgentOperationService.family_for(session.capability_type) or "agent",
+                )
+            provider = self._get_provider(session)
+            if operation not in provider.operations():
+                raise ConflictResource(
+                    f"Operation '{operation}' is not supported by capability '{session.capability_type}'"
+                )
+            result = provider.execute(operation, params or {})
+        except ConflictResource as exc:
+            self._record(session, user_id, operation, False, str(exc))
+            raise
+        return CompletedOperation(session, operation, result.message, result.data, result.success)
+
+    def finish(self, user_id: str, outcome: CompletedOperation) -> dict[str, Any]:
+        self._record(outcome.session, user_id, outcome.operation, outcome.success, outcome.message)
+        if not outcome.success:
+            raise ConflictResource(outcome.message)
+        return self._result(outcome.session, outcome.operation, outcome.message, outcome.data)
+
+    def fail(self, user_id: str, pending: PendingOperation, exc: Exception) -> None:
+        self._record(pending.session, user_id, pending.operation, False, str(exc))
+
+    def accepted(self, user_id: str, pending: PendingOperation) -> dict[str, Any]:
+        """Response for a detached (asynchronous) submission."""
+        self._record(pending.session, user_id, pending.operation, True, "queued")
+        return {
+            **self._result(pending.session, pending.operation, "Operation queued", None),
+            "operation_id": pending.operation_id,
+            "status": "pending",
+        }
+
+    def execute(
+        self, session_id: str, user_id: str, operation: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Synchronous execute (blocks the calling thread for Agent operations)."""
+        outcome = self.begin(session_id, user_id, operation, params)
+        if isinstance(outcome, PendingOperation):
+            try:
+                remote = self.agent_operation_service._await_result(
+                    outcome.operation_id, outcome.timeout, outcome.family
+                )
+            except ConflictResource as exc:
+                self.fail(user_id, outcome, exc)
+                raise
+            outcome = CompletedOperation(
+                outcome.session, outcome.operation, remote.get("message", "ok"), remote.get("data")
+            )
+        return self.finish(user_id, outcome)
+
+    async def execute_async(
+        self,
+        session_id: str,
+        user_id: str,
+        operation: str,
+        params: dict[str, Any] | None = None,
+        *,
+        detached: bool = False,
+    ) -> dict[str, Any]:
+        """Route-friendly execute: database and provider work run in the threadpool,
+        while waiting for an Agent result happens on the event loop."""
+        from starlette.concurrency import run_in_threadpool
+
+        outcome = await run_in_threadpool(
+            lambda: self.begin(session_id, user_id, operation, params, detached=detached)
+        )
+        if isinstance(outcome, PendingOperation):
+            if detached:
+                return await run_in_threadpool(self.accepted, user_id, outcome)
+            try:
+                remote = await self.agent_operation_service.await_result_async(
+                    outcome.operation_id, outcome.timeout, outcome.family
+                )
+            except ConflictResource as exc:
+                await run_in_threadpool(self.fail, user_id, outcome, exc)
+                raise
+            outcome = CompletedOperation(
+                outcome.session, outcome.operation, remote.get("message", "ok"), remote.get("data")
+            )
+        return await run_in_threadpool(self.finish, user_id, outcome)
+
+    def operation_status(self, session_id: str, user_id: str, operation_id: str, *, is_admin: bool):
+        session = self.session_repository.get(session_id)
+        if session is None:
+            raise ResourceNotFound("Session", session_id)
+        if session.user_id != user_id and not is_admin:
+            raise ConflictResource("Only the session owner can view its operations")
+        if self.agent_operation_service is None:
+            raise ResourceNotFound("Agent operation", operation_id)
+        operation = self.agent_operation_service.get_for_session(session_id, operation_id)
+        described = AgentOperationService.describe(operation)
+        described["data"] = self._normalize(described["data"])
+        return described
 
     def release_session(self, session_id: str) -> None:
         """Drop any cached provider for a closed/expired session."""

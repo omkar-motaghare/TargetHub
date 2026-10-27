@@ -56,16 +56,22 @@ class AgentOperationRepository:
             )
             .order_by(AgentOperation.requested_at.asc())
         )
-        operation = self.db.scalars(statement).first()
-        if operation is None:
-            return None
-
-        operation.status = "in_progress"
-        operation.dispatched_at = now
-        operation.lease_expires_at = lease_expires_at
-        self.db.commit()
-        self.db.refresh(operation)
-        return operation
+        candidates = list(self.db.scalars(statement.limit(5)).all())
+        for operation in candidates:
+            previous_status = operation.status
+            # Conditional update: only one poller (any worker/process) can win the claim.
+            claimed = self.db.execute(
+                update(AgentOperation)
+                .where(
+                    AgentOperation.id == operation.id,
+                    AgentOperation.status == previous_status,
+                )
+                .values(status="in_progress", dispatched_at=now, lease_expires_at=lease_expires_at)
+            ).rowcount
+            self.db.commit()
+            if claimed == 1:
+                return self.get(operation.id)
+        return None
 
     def expire_stale(self, *, agent_id: str, now: datetime, pending_before: datetime) -> int:
         """Time out operations whose lease lapsed or that nobody claimed in time."""

@@ -68,8 +68,10 @@ class AgentEnrollResponse(BaseModel):
 
 
 class AgentHeartbeat(BaseModel):
-    hostname: str | None = None
-    resources: list[AgentResourceCreate] = Field(default_factory=list)
+    hostname: str | None = Field(default=None, max_length=255)
+    agent_version: str | None = Field(default=None, max_length=32)
+    platform: str | None = Field(default=None, max_length=32)
+    resources: list[AgentResourceCreate] = Field(default_factory=list, max_length=512)
 
 
 class AgentOperationPollRequest(BaseModel):
@@ -111,6 +113,8 @@ class AgentResponse(BaseModel):
     status: str
     enabled: bool
     last_seen_at: datetime | None
+    agent_version: str | None = None
+    platform: str | None = None
     credential_prefix: str | None = None
     credential_created_at: datetime | None = None
     credential_revoked_at: datetime | None = None

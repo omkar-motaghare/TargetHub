@@ -95,6 +95,11 @@ class FakeSessionRepo:
         self.items.append(session)
         return session
 
+    def close(self, session, now, status="closed"):
+        session.status = status
+        session.ended_at = now
+        return session
+
     def update(self, session):
         return session
 

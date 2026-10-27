@@ -262,7 +262,7 @@ def test_serial_runtime_simulated_transport_roundtrip():
     assert wrote["success"] is True
     assert wrote["data"]["bytes_written"] == 5
 
-    read = serial_runtime.execute({**payload, "operation": "read", "params": {"size": 64}})
+    read = serial_runtime.execute({**payload, "operation": "read", "params": {"size": 4096}})
     assert read["success"] is True
     assert "hello" in read["data"]["data_text"]
 

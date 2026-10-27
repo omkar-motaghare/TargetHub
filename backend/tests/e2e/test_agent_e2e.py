@@ -375,7 +375,9 @@ def test_full_lab_flow(lab: Lab):
     audit = lab.call("GET", "/audit", admin)
     assert audit.status_code == 200
     assert any(entry["action"] == "provider.execute" for entry in audit.json())
-    assert "targethub_provider_operations_total" in lab.http.get(f"{lab.base}/metrics").text
+    assert "targethub_provider_operations_total" in lab.http.get(
+        f"{lab.base}/metrics", headers={"Authorization": f"Bearer {admin}"}
+    ).text
 
     # --- releasing the reservation ends sessions; bob can now reserve
     released = lab.call("POST", f"/reservations/{reservation_id}/release", alice, params={"user_id": "alice"})

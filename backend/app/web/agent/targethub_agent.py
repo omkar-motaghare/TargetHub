@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Small dependency-free TargetHub Agent runtime for Linux hosts."""
+"""TargetHub Agent: bridges a TargetHub hub to the hardware attached to this host.
+
+Runs on Linux (including Raspberry Pi / Yocto / BusyBox images) and Windows.
+The core is standard-library only. ``pyserial`` is used when installed (needed
+for serial ports on Windows); on Linux the agent falls back to termios.
+
+Protocol (all HTTPS JSON, authenticated with the Agent credential):
+  * heartbeat  - report hostname and discovered resources
+  * poll       - long-poll the hub for the next operation
+  * complete   - report an operation result
+Operations for different resources run concurrently; power and deploy
+operations on the same resource are serialized.
+"""
 
 from __future__ import annotations
 
@@ -9,46 +21,68 @@ import json
 import logging
 import os
 import random
-import select
 import signal
 import socket
 import ssl
 import subprocess
 import sys
 import tempfile
-import termios
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from glob import glob
 from pathlib import Path
-from tty import setraw
+
+AGENT_VERSION = "0.2.0"
+IS_WINDOWS = sys.platform.startswith("win")
+IS_LINUX = sys.platform.startswith("linux")
+
+if not IS_WINDOWS:  # pragma: no branch - platform specific imports
+    import select
+    import termios
+    from tty import setraw
+else:  # pragma: no cover - exercised on Windows only
+    select = None  # type: ignore[assignment]
+    termios = None  # type: ignore[assignment]
+    setraw = None  # type: ignore[assignment]
+
+try:  # optional dependency
+    import serial as _pyserial  # type: ignore[import-not-found]
+    from serial.tools import list_ports as _list_ports  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - depends on host
+    _pyserial = None
+    _list_ports = None
 
 log = logging.getLogger("targethub-agent")
 
 DEFAULT_INTERVAL = 15
 DEFAULT_REQUEST_TIMEOUT = 15
-DEFAULT_OPERATION_POLL_WAIT_SECONDS = 5
+DEFAULT_OPERATION_POLL_WAIT_SECONDS = 10
+DEFAULT_MAX_CONCURRENT_OPERATIONS = 8
+DEFAULT_SERIAL_IDLE_TIMEOUT = 900
 MAX_RETRY_DELAY = 120
 MAX_SERIAL_READ_SIZE = 65536
+MAX_SERIAL_READ_WAIT_SECONDS = 5.0
+SERIAL_BUFFER_BYTES = 1024 * 1024
+SERIAL_COALESCE_SECONDS = 0.03
 MAX_USB_DEVICES = 32
 MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
 DEFAULT_DEPLOY_TIMEOUT = 300
 DEFAULT_GPIO_BASE = "/sys/class/gpio"
+DEFAULT_CONFIG_PATH = (
+    r"C:\ProgramData\TargetHub\agent\config.json" if IS_WINDOWS else "/etc/targethub-agent/config.json"
+)
 
 _ssl_context: ssl.SSLContext | None = None
 _stop = threading.Event()
 
-_BAUD_TO_TERM = {
-    9600: termios.B9600,
-    19200: termios.B19200,
-    38400: termios.B38400,
-    57600: termios.B57600,
-    115200: termios.B115200,
-    230400: termios.B230400,
-}
+SUPPORTED_BAUDRATES = (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600)
+
+
+# --------------------------------------------------------------------------- config / http
 
 
 def load_config(path: Path) -> dict:
@@ -59,7 +93,10 @@ def save_config(path: Path, config: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(config, indent=2), encoding="utf-8")
-    os.chmod(temporary, 0o600)
+    try:
+        os.chmod(temporary, 0o600)
+    except OSError:  # pragma: no cover - e.g. some Windows filesystems
+        pass
     temporary.replace(path)
 
 
@@ -82,7 +119,7 @@ def validate_hub_url(config: dict, allow_insecure: bool) -> None:
 
 def sd_notify(message: str) -> None:
     address = os.environ.get("NOTIFY_SOCKET")
-    if not address:
+    if not address or not hasattr(socket, "AF_UNIX"):
         return
     if address.startswith("@"):
         address = "\0" + address[1:]
@@ -104,7 +141,11 @@ def api_request(
     request = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json", **(headers or {})},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": f"targethub-agent/{AGENT_VERSION}",
+            **(headers or {}),
+        },
         method="POST",
     )
     try:
@@ -118,9 +159,16 @@ def api_request(
         raise RuntimeError(f"Unable to reach TargetHub: {exc.reason}") from exc
 
 
-def ensure_linux() -> None:
-    if sys.platform != "linux":
-        raise RuntimeError("TargetHub Agent currently supports Linux hosts only")
+def ensure_supported_platform() -> None:
+    if not (IS_LINUX or IS_WINDOWS):
+        raise RuntimeError("TargetHub Agent supports Linux and Windows hosts")
+
+
+# Backwards-compatible name used by older installers/tests.
+ensure_linux = ensure_supported_platform
+
+
+# --------------------------------------------------------------------------- discovery
 
 
 def _read_sysfs_text(path: Path) -> str:
@@ -157,68 +205,111 @@ def discover_usb_devices(hostname: str) -> list[dict]:
     return devices
 
 
+def _windows_com_ports() -> list[dict]:  # pragma: no cover - Windows only
+    ports: list[dict] = []
+    if _list_ports is not None:
+        for info in sorted(_list_ports.comports(), key=lambda item: item.device):
+            ports.append(
+                {
+                    "path": info.device,
+                    "description": info.description or info.device,
+                    "vendor_id": f"{info.vid:04x}" if info.vid is not None else "",
+                    "product_id": f"{info.pid:04x}" if info.pid is not None else "",
+                    "serial_number": info.serial_number or "",
+                }
+            )
+        return ports
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DEVICEMAP\SERIALCOMM") as key:
+            index = 0
+            while True:
+                try:
+                    _name, value, _kind = winreg.EnumValue(key, index)
+                except OSError:
+                    break
+                ports.append({"path": str(value), "description": str(value)})
+                index += 1
+    except OSError:
+        pass
+    return sorted(ports, key=lambda item: item["path"])
+
+
+def _serial_resource(path: str, display: str, metadata: dict) -> dict:
+    return {
+        "resource_key": path,
+        "resource_type": "serial",
+        "display_name": display,
+        "metadata": metadata,
+        "available": True,
+    }
+
+
 def discover_resources(config: dict) -> list[dict]:
     resources: list[dict] = []
     hostname = socket.gethostname()
 
-    # Prefer stable /dev/serial/by-id paths when available. They are often
-    # symlinks to the same devices exposed as /dev/ttyUSB* or /dev/ttyACM*.
-    # Reporting both would make one physical serial device appear twice in the UI.
-    serial_candidates = sorted(
-        set(glob("/dev/serial/by-id/*") + glob("/dev/ttyUSB*") + glob("/dev/ttyACM*"))
-    )
-    seen_serial_devices: set[str] = set()
-    stable_serials = [path for path in serial_candidates if path.startswith("/dev/serial/by-id/")]
-    fallback_serials = [path for path in serial_candidates if not path.startswith("/dev/serial/by-id/")]
-
-    for path in stable_serials + fallback_serials:
-        try:
-            physical_path = os.path.realpath(path)
-        except OSError:
-            physical_path = path
-        if physical_path in seen_serial_devices:
-            continue
-        seen_serial_devices.add(physical_path)
-        resources.append(
-            {
-                "resource_key": path,
-                "resource_type": "serial",
-                "display_name": Path(path).name,
-                "metadata": {
-                    "path": path,
-                    "physical_path": physical_path,
-                    "hostname": hostname,
-                },
-                "available": True,
-            }
+    if IS_WINDOWS:  # pragma: no cover - Windows only
+        for port in _windows_com_ports():
+            resources.append(
+                _serial_resource(
+                    port["path"],
+                    f"{port['path']} ({port.get('description') or 'serial'})",
+                    {**port, "hostname": hostname},
+                )
+            )
+    else:
+        # Prefer stable /dev/serial/by-id paths when available. They are often
+        # symlinks to the same devices exposed as /dev/ttyUSB* or /dev/ttyACM*.
+        serial_candidates = sorted(
+            set(glob("/dev/serial/by-id/*") + glob("/dev/ttyUSB*") + glob("/dev/ttyACM*"))
         )
+        seen_serial_devices: set[str] = set()
+        stable = [path for path in serial_candidates if path.startswith("/dev/serial/by-id/")]
+        fallback = [path for path in serial_candidates if not path.startswith("/dev/serial/by-id/")]
+        for path in stable + fallback:
+            try:
+                physical_path = os.path.realpath(path)
+            except OSError:
+                physical_path = path
+            if physical_path in seen_serial_devices:
+                continue
+            seen_serial_devices.add(physical_path)
+            resources.append(
+                _serial_resource(
+                    path,
+                    Path(path).name,
+                    {"path": path, "physical_path": physical_path, "hostname": hostname},
+                )
+            )
 
-    for path in sorted(glob("/sys/class/net/*")):
-        name = Path(path).name
-        if name == "lo":
-            continue
-        resources.append(
-            {
-                "resource_key": f"net:{name}",
-                "resource_type": "network_interface",
-                "display_name": name,
-                "metadata": {"interface": name, "hostname": hostname},
-                "available": True,
-            }
-        )
+        for path in sorted(glob("/sys/class/net/*")):
+            name = Path(path).name
+            if name == "lo":
+                continue
+            resources.append(
+                {
+                    "resource_key": f"net:{name}",
+                    "resource_type": "network_interface",
+                    "display_name": name,
+                    "metadata": {"interface": name, "hostname": hostname},
+                    "available": True,
+                }
+            )
 
-    for path in sorted(glob("/dev/gpiochip*")):
-        resources.append(
-            {
-                "resource_key": f"gpio:{Path(path).name}",
-                "resource_type": "gpio_chip",
-                "display_name": Path(path).name,
-                "metadata": {"path": path, "hostname": hostname},
-                "available": True,
-            }
-        )
+        for path in sorted(glob("/dev/gpiochip*")):
+            resources.append(
+                {
+                    "resource_key": f"gpio:{Path(path).name}",
+                    "resource_type": "gpio_chip",
+                    "display_name": Path(path).name,
+                    "metadata": {"path": path, "hostname": hostname},
+                    "available": True,
+                }
+            )
 
-    resources.extend(discover_usb_devices(hostname))
+        resources.extend(discover_usb_devices(hostname))
 
     for item in config.get("resources", []):
         resources.append(
@@ -226,12 +317,23 @@ def discover_resources(config: dict) -> list[dict]:
                 "resource_key": item["resource_key"],
                 "resource_type": item.get("resource_type", "custom"),
                 "display_name": item.get("display_name", item["resource_key"]),
-                "metadata": item.get("metadata", {}),
+                "metadata": _public_metadata(item.get("metadata", {})),
                 "available": item.get("available", True),
             }
         )
 
     return resources
+
+
+# Local-only keys that must never be reported to the hub (commands, credentials).
+_PRIVATE_METADATA_KEYS = {"command", "api_key", "api_key_env", "password", "token"}
+
+
+def _public_metadata(metadata: dict) -> dict:
+    return {key: value for key, value in (metadata or {}).items() if key not in _PRIVATE_METADATA_KEYS}
+
+
+# --------------------------------------------------------------------------- hub protocol
 
 
 def _redact(value: str, secrets: list[str]) -> str:
@@ -281,7 +383,11 @@ def enroll(config: dict, config_path: Path, request_timeout: int = DEFAULT_REQUE
     log.info("Enrolled Agent %s", config["agent_id"])
 
 
-def heartbeat(config: dict, request_timeout: int = DEFAULT_REQUEST_TIMEOUT) -> None:
+def heartbeat(
+    config: dict,
+    request_timeout: int = DEFAULT_REQUEST_TIMEOUT,
+    resources: list[dict] | None = None,
+) -> None:
     targethub_url = config["targethub_url"].rstrip("/")
     agent_id = config["agent_id"]
     credential = config["credential"]
@@ -289,7 +395,9 @@ def heartbeat(config: dict, request_timeout: int = DEFAULT_REQUEST_TIMEOUT) -> N
         f"{targethub_url}/api/v1/agents/{agent_id}/heartbeat",
         {
             "hostname": socket.gethostname(),
-            "resources": discover_resources(config),
+            "resources": resources if resources is not None else discover_resources(config),
+            "agent_version": AGENT_VERSION,
+            "platform": sys.platform,
         },
         {"Authorization": f"Bearer {credential}"},
         timeout=request_timeout,
@@ -305,7 +413,7 @@ def poll_operation(
     targethub_url = config["targethub_url"].rstrip("/")
     agent_id = config["agent_id"]
     credential = config["credential"]
-    lease_seconds = max(10, wait_seconds * 3)
+    lease_seconds = max(10, min(120, wait_seconds * 3))
     return api_request(
         f"{targethub_url}/api/v1/agents/{agent_id}/operations/poll",
         {
@@ -341,18 +449,242 @@ def complete_operation(
     )
 
 
-class SerialRuntime:
-    def __init__(self) -> None:
-        self._open_fds: dict[tuple[str, str], int] = {}
-        self._sim_open: set[tuple[str, str]] = set()
-        self._sim_buffers: dict[tuple[str, str], str] = {}
+# --------------------------------------------------------------------------- serial
 
-    @staticmethod
-    def _resource_key(operation_payload: dict) -> tuple[str, str]:
+
+class _PosixPort:
+    """Raw tty access through termios (Linux fallback when pyserial is absent)."""
+
+    def __init__(self, path: str, baudrate: int) -> None:
+        self.fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+        try:
+            speed = getattr(termios, f"B{baudrate}", termios.B115200)
+            attributes = termios.tcgetattr(self.fd)
+            attributes[4] = speed
+            attributes[5] = speed
+            termios.tcsetattr(self.fd, termios.TCSANOW, attributes)
+            setraw(self.fd)
+        except (OSError, termios.error):
+            os.close(self.fd)
+            raise
+
+    def read(self, size: int, timeout: float) -> bytes:
+        readable, _, _ = select.select([self.fd], [], [], max(0.0, timeout))
+        if not readable:
+            return b""
+        try:
+            return os.read(self.fd, size)
+        except BlockingIOError:
+            return b""
+
+    def write(self, data: bytes) -> int:
+        total = 0
+        deadline = time.monotonic() + 5
+        while total < len(data):
+            try:
+                total += os.write(self.fd, data[total:])
+            except BlockingIOError:
+                if time.monotonic() > deadline:
+                    break
+                select.select([], [self.fd], [], 0.1)
+        return total
+
+    def close(self) -> None:
+        os.close(self.fd)
+
+
+class _PySerialPort:  # pragma: no cover - exercised where pyserial is installed
+    def __init__(self, path: str, baudrate: int) -> None:
+        self.port = _pyserial.Serial(path, baudrate=baudrate, timeout=0.2, write_timeout=5)
+
+    def read(self, size: int, timeout: float) -> bytes:
+        self.port.timeout = max(0.01, timeout)
+        waiting = self.port.in_waiting
+        return self.port.read(max(1, min(size, waiting or 1)))
+
+    def write(self, data: bytes) -> int:
+        return int(self.port.write(data) or 0)
+
+    def close(self) -> None:
+        self.port.close()
+
+
+def open_serial_port(path: str, baudrate: int):
+    if _pyserial is not None:
+        return _PySerialPort(path, baudrate)
+    if IS_WINDOWS:  # pragma: no cover - Windows only
+        raise OSError("pyserial is required for serial ports on Windows (pip install pyserial)")
+    return _PosixPort(path, baudrate)
+
+
+class VirtualBoard:
+    """Built-in simulated target for ``sim://`` serial resources.
+
+    Behaves like a small embedded board: prints a boot log, offers a shell
+    prompt and answers a few commands, so the full console path can be
+    exercised on any OS without hardware.
+    """
+
+    PROMPT = "board> "
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.booted_at = time.monotonic()
+        self._line = ""
+
+    def boot_banner(self) -> str:
         return (
-            str(operation_payload.get("session_id", "")),
-            str(operation_payload.get("resource_id", "")),
+            "\r\n[    0.000000] TargetHub virtual board booting\r\n"
+            f"[    0.010000] Machine model: {self.name}\r\n"
+            "[    0.120000] console: ttyS0 ready\r\n"
+            "[simulated] serial console ready\r\n"
+            f"{self.PROMPT}"
         )
+
+    def feed(self, text: str) -> str:
+        output = []
+        for char in text:
+            if char in "\r\n":
+                command = self._line.strip()
+                self._line = ""
+                output.append("\r\n")
+                if command:
+                    output.append(self._respond(command))
+                output.append(self.PROMPT)
+            elif char in "\x7f\b":
+                if self._line:
+                    self._line = self._line[:-1]
+                    output.append("\b \b")
+            elif char == "\x03":
+                self._line = ""
+                output.append(f"^C\r\n{self.PROMPT}")
+            else:
+                self._line += char
+                output.append(char)
+        return "".join(output)
+
+    def _respond(self, command: str) -> str:
+        name, _, rest = command.partition(" ")
+        if name == "help":
+            return "commands: help, version, uptime, echo <text>, reboot\r\n"
+        if name == "version":
+            return f"TargetHub virtual board {AGENT_VERSION}\r\n"
+        if name == "uptime":
+            return f"up {time.monotonic() - self.booted_at:.1f}s\r\n"
+        if name == "echo":
+            return f"{rest}\r\n"
+        if name == "reboot":
+            self.booted_at = time.monotonic()
+            return "rebooting...\r\n" + self.boot_banner().rstrip(self.PROMPT)
+        return f"{name}: command not found\r\n"
+
+
+class SerialChannel:
+    """One open serial device with a background reader feeding a bounded buffer."""
+
+    def __init__(self, resource_id: str, session_id: str, path: str, port=None, board: VirtualBoard | None = None):
+        self.resource_id = resource_id
+        self.session_id = session_id
+        self.path = path
+        self.port = port
+        self.board = board
+        self._buffer = bytearray()
+        self.dropped = 0
+        self._cond = threading.Condition()
+        self._closed = threading.Event()
+        self.last_activity = time.monotonic()
+        self._reader: threading.Thread | None = None
+        if board is not None:
+            self._append(board.boot_banner().encode("utf-8"))
+        elif port is not None:
+            self._reader = threading.Thread(target=self._read_loop, name=f"serial-{path}", daemon=True)
+            self._reader.start()
+
+    @property
+    def simulated(self) -> bool:
+        return self.board is not None
+
+    def _append(self, data: bytes) -> None:
+        if not data:
+            return
+        with self._cond:
+            self._buffer.extend(data)
+            overflow = len(self._buffer) - SERIAL_BUFFER_BYTES
+            if overflow > 0:
+                del self._buffer[:overflow]
+                self.dropped += overflow
+            self._cond.notify_all()
+
+    def _read_loop(self) -> None:
+        while not self._closed.is_set():
+            try:
+                data = self.port.read(4096, 0.2)
+            except (OSError, ValueError) as exc:
+                if not self._closed.is_set():
+                    log.warning("serial read on %s failed: %s", self.path, exc)
+                    self._append(f"\r\n[targethub] serial read error: {exc}\r\n".encode())
+                    self._closed.wait(1.0)
+                continue
+            except Exception as exc:  # pragma: no cover - pyserial specific errors
+                if not self._closed.is_set():
+                    log.warning("serial read on %s failed: %s", self.path, exc)
+                    self._closed.wait(1.0)
+                continue
+            self._append(data)
+
+    def read(self, size: int, wait: float) -> tuple[bytes, int]:
+        self.last_activity = time.monotonic()
+        deadline = time.monotonic() + max(0.0, wait)
+        with self._cond:
+            while not self._buffer and not self._closed.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._cond.wait(remaining)
+            # Coalesce a burst: once data arrives, linger briefly for the rest of it.
+            linger_until = min(deadline, time.monotonic() + SERIAL_COALESCE_SECONDS)
+            while self._buffer and len(self._buffer) < size and not self._closed.is_set():
+                before = len(self._buffer)
+                remaining = linger_until - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._cond.wait(remaining)
+                if len(self._buffer) == before:
+                    break
+            data = bytes(self._buffer[:size])
+            del self._buffer[: len(data)]
+            dropped, self.dropped = self.dropped, 0
+        return data, dropped
+
+    def write(self, data: bytes) -> int:
+        self.last_activity = time.monotonic()
+        if self.board is not None:
+            self._append(self.board.feed(data.decode("utf-8", errors="replace")).encode("utf-8"))
+            return len(data)
+        return self.port.write(data)
+
+    def close(self) -> None:
+        self._closed.set()
+        with self._cond:
+            self._cond.notify_all()
+        if self.port is not None:
+            try:
+                self.port.close()
+            except Exception as exc:  # noqa: BLE001 - best effort
+                log.debug("serial close failed: %s", exc)
+        if self._reader is not None:
+            self._reader.join(timeout=2)
+
+
+class SerialRuntime:
+    """Serial channels keyed by resource; at most one session owns a device at a time."""
+
+    def __init__(self, allowed_paths=None, idle_timeout: float = DEFAULT_SERIAL_IDLE_TIMEOUT) -> None:
+        self._channels: dict[str, SerialChannel] = {}
+        self._lock = threading.Lock()
+        # Callable returning the set of device paths this agent may open (None: any path).
+        self._allowed_paths = allowed_paths
+        self.idle_timeout = idle_timeout
 
     @staticmethod
     def _is_simulated(operation_payload: dict) -> bool:
@@ -369,156 +701,134 @@ class SerialRuntime:
         return str(operation_payload.get("resource_key", ""))
 
     @staticmethod
-    def _configure_fd(fd: int, metadata: dict) -> None:
-        baudrate = int(metadata.get("baudrate", 115200))
-        speed = _BAUD_TO_TERM.get(baudrate, termios.B115200)
-        attributes = termios.tcgetattr(fd)
-        attributes[4] = speed
-        attributes[5] = speed
-        termios.tcsetattr(fd, termios.TCSANOW, attributes)
-        setraw(fd)
-
-    @staticmethod
     def _as_text(value: object) -> str:
-        if isinstance(value, str):
-            return value
-        return str(value)
+        return value if isinstance(value, str) else str(value)
 
     @staticmethod
     def _read_size(params: dict) -> int:
         size = int(params.get("size", 4096))
         return max(1, min(size, MAX_SERIAL_READ_SIZE))
 
+    def _path_allowed(self, path: str) -> bool:
+        if self._allowed_paths is not None:
+            return path in self._allowed_paths()
+        if IS_WINDOWS:  # pragma: no cover
+            return path.upper().startswith(("COM", "\\\\.\\COM"))
+        return path.startswith("/dev/")
+
     def close_all(self) -> None:
-        for fd in self._open_fds.values():
-            try:
-                os.close(fd)
-            except OSError as exc:
-                log.debug("serial close failed: %s", exc)
-        self._open_fds.clear()
+        with self._lock:
+            channels = list(self._channels.values())
+            self._channels.clear()
+        for channel in channels:
+            channel.close()
+
+    def reap_idle(self) -> int:
+        """Close channels nobody has used for ``idle_timeout`` seconds (safety net)."""
+        cutoff = time.monotonic() - self.idle_timeout
+        with self._lock:
+            stale = [key for key, channel in self._channels.items() if channel.last_activity < cutoff]
+            channels = [self._channels.pop(key) for key in stale]
+        for channel in channels:
+            log.info("closing idle serial channel %s (session %s)", channel.path, channel.session_id)
+            channel.close()
+        return len(channels)
 
     def execute(self, operation_payload: dict) -> dict:
         operation = str(operation_payload.get("operation", "")).strip().lower()
         params = operation_payload.get("params") or {}
-        key = self._resource_key(operation_payload)
-        if not key[0] or not key[1]:
+        session_id = str(operation_payload.get("session_id", ""))
+        resource_id = str(operation_payload.get("resource_id", ""))
+        if not session_id or not resource_id:
             return {"success": False, "message": "Operation is missing session/resource binding"}
 
-        if self._is_simulated(operation_payload):
-            return self._execute_simulated(operation, key, params)
-        return self._execute_real(operation_payload, operation, key, params)
+        mode = {"mode": "simulated"} if self._is_simulated(operation_payload) else {}
+        path = self._resolve_path(operation_payload)
 
-    def _execute_simulated(self, operation: str, key: tuple[str, str], params: dict) -> dict:
         if operation == "open":
-            if key not in self._sim_open:
-                self._sim_open.add(key)
-                self._sim_buffers[key] = "[simulated] serial console ready\r\n"
-            return {"success": True, "message": "Serial connection opened", "data": {"mode": "simulated"}}
+            return self._open(operation_payload, session_id, resource_id, path, mode)
 
         if operation == "close":
-            self._sim_open.discard(key)
-            self._sim_buffers.pop(key, None)
-            return {"success": True, "message": "Serial connection closed", "data": {"mode": "simulated"}}
+            with self._lock:
+                channel = self._channels.get(resource_id)
+                if channel is None or channel.session_id != session_id:
+                    return {"success": True, "message": "Serial connection already closed", "data": {"path": path, **mode}}
+                self._channels.pop(resource_id)
+            channel.close()
+            return {"success": True, "message": "Serial connection closed", "data": {"path": path, **mode}}
 
-        if key not in self._sim_open:
+        with self._lock:
+            channel = self._channels.get(resource_id)
+        if channel is None or channel.session_id != session_id:
             return {"success": False, "message": "Serial connection is not open"}
 
         if operation == "write":
-            text = self._as_text(params.get("text", ""))
-            self._sim_buffers[key] = self._sim_buffers.get(key, "") + f"{text}\r\n"
-            return {
-                "success": True,
-                "message": "Serial data written",
-                "data": {"bytes_written": len(text.encode("utf-8")), "mode": "simulated"},
-            }
+            payload = self._as_text(params.get("text", "")).encode("utf-8")
+            try:
+                written = channel.write(payload)
+            except Exception as exc:  # noqa: BLE001 - surface any transport error
+                return {"success": False, "message": f"Failed to write serial data: {exc}"}
+            return {"success": True, "message": "Serial data written", "data": {"bytes_written": written, "path": path, **mode}}
 
         if operation == "read":
-            content = self._sim_buffers.get(key, "")
-            self._sim_buffers[key] = ""
-            data = content.encode("utf-8")
+            metadata = operation_payload.get("resource_metadata") or {}
+            if "wait_ms" in params:
+                wait = int(params.get("wait_ms") or 0) / 1000.0
+            else:
+                wait = float(metadata.get("timeout", 0.2))
+            wait = max(0.0, min(wait, MAX_SERIAL_READ_WAIT_SECONDS))
+            data, dropped = channel.read(self._read_size(params), wait)
             return {
                 "success": True,
                 "message": "Serial data read",
                 "data": {
                     "bytes_read": len(data),
-                    "data_text": content,
+                    "data_text": data.decode("utf-8", errors="replace"),
                     "data_hex": data.hex(),
-                    "mode": "simulated",
+                    "dropped_bytes": dropped,
+                    "path": path,
+                    **mode,
                 },
             }
 
         return {"success": False, "message": f"Unsupported serial operation '{operation}'"}
 
-    def _execute_real(
-        self,
-        operation_payload: dict,
-        operation: str,
-        key: tuple[str, str],
-        params: dict,
-    ) -> dict:
-        path = self._resolve_path(operation_payload)
-        metadata = operation_payload.get("resource_metadata") or {}
+    def _open(self, payload: dict, session_id: str, resource_id: str, path: str, mode: dict) -> dict:
+        with self._lock:
+            existing = self._channels.get(resource_id)
+            if existing is not None and existing.session_id == session_id:
+                return {"success": True, "message": "Serial connection already open", "data": {"path": path, **mode}}
+            if existing is not None:
+                # The hub only dispatches for active sessions, so a different
+                # owner means the previous session ended: take the port over.
+                log.info("serial %s: session %s replaces %s", path, session_id, existing.session_id)
+                self._channels.pop(resource_id)
+        if existing is not None:
+            existing.close()
 
-        if operation == "open":
-            if key in self._open_fds:
-                return {"success": True, "message": "Serial connection already open", "data": {"path": path}}
-            if not path.startswith("/dev/"):
-                return {"success": False, "message": f"Serial path '{path}' is not allowed"}
+        metadata = payload.get("resource_metadata") or {}
+        if mode:
+            channel = SerialChannel(resource_id, session_id, path, board=VirtualBoard(path))
+        else:
+            if not self._path_allowed(path):
+                return {"success": False, "message": f"Serial path '{path}' is not allowed on this Agent"}
             try:
-                fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
-                self._configure_fd(fd, metadata)
-                self._open_fds[key] = fd
-                return {"success": True, "message": "Serial connection opened", "data": {"path": path}}
-            except OSError as exc:
+                baudrate = int(metadata.get("baudrate", 115200))
+            except (TypeError, ValueError):
+                baudrate = 115200
+            if baudrate not in SUPPORTED_BAUDRATES:
+                return {"success": False, "message": f"Unsupported baudrate {baudrate}"}
+            try:
+                port = open_serial_port(path, baudrate)
+            except Exception as exc:  # noqa: BLE001 - OSError or pyserial SerialException
                 return {"success": False, "message": f"Failed to open serial connection: {exc}"}
+            channel = SerialChannel(resource_id, session_id, path, port=port)
+        with self._lock:
+            self._channels[resource_id] = channel
+        return {"success": True, "message": "Serial connection opened", "data": {"path": path, **mode}}
 
-        if operation == "close":
-            fd = self._open_fds.pop(key, None)
-            if fd is None:
-                return {"success": True, "message": "Serial connection already closed", "data": {"path": path}}
-            try:
-                os.close(fd)
-            except OSError as exc:
-                log.debug("serial close failed: %s", exc)
-            return {"success": True, "message": "Serial connection closed", "data": {"path": path}}
 
-        fd = self._open_fds.get(key)
-        if fd is None:
-            return {"success": False, "message": "Serial connection is not open"}
-
-        if operation == "write":
-            text = self._as_text(params.get("text", ""))
-            payload = text.encode("utf-8")
-            try:
-                written = os.write(fd, payload)
-                return {
-                    "success": True,
-                    "message": "Serial data written",
-                    "data": {"bytes_written": written, "path": path},
-                }
-            except OSError as exc:
-                return {"success": False, "message": f"Failed to write serial data: {exc}"}
-
-        if operation == "read":
-            size = self._read_size(params)
-            timeout = float(metadata.get("timeout", 0.2))
-            try:
-                readable, _, _ = select.select([fd], [], [], max(0.0, timeout))
-                data = os.read(fd, size) if readable else b""
-                return {
-                    "success": True,
-                    "message": "Serial data read",
-                    "data": {
-                        "bytes_read": len(data),
-                        "data_text": data.decode("utf-8", errors="replace"),
-                        "data_hex": data.hex(),
-                        "path": path,
-                    },
-                }
-            except OSError as exc:
-                return {"success": False, "message": f"Failed to read serial data: {exc}"}
-
-        return {"success": False, "message": f"Unsupported serial operation '{operation}'"}
+# --------------------------------------------------------------------------- power
 
 
 class SysfsGpio:
@@ -578,6 +888,131 @@ class GpiodCli:
             proc.wait(timeout=5)
 
 
+class DDPowerClient:
+    """Client for the DD Endpoint Control REST API (relay endpoints over MQTT).
+
+    A control request returns 202 once the command is *published*; the
+    device confirms asynchronously, so state changes are confirmed by polling
+    the status endpoint until ``current_state`` matches.
+    """
+
+    def __init__(self, metadata: dict) -> None:
+        self.base_url = str(metadata.get("base_url", "")).rstrip("/")
+        if not self.base_url.startswith(("http://", "https://")):
+            raise ValueError("DD power requires base_url (http:// or https://)")
+        self.hub_mac = str(metadata.get("hub_mac", "")).strip()
+        if not self.hub_mac:
+            raise ValueError("DD power requires hub_mac")
+        self.node_id = int(metadata["node_id"])
+        self.endpoint = int(metadata["endpoint"])
+        key_env = metadata.get("api_key_env")
+        self.api_key = os.environ.get(str(key_env), "") if key_env else str(metadata.get("api_key", ""))
+        self.timeout = max(1.0, min(float(metadata.get("timeout", 10)), 60.0))
+        self.confirm_timeout = max(0.0, min(float(metadata.get("confirm_timeout", 10)), 120.0))
+        self.cycle_delay = max(0.5, min(float(metadata.get("cycle_delay", 3)), 60.0))
+
+    def _call(self, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
+        headers = {"Accept": "application/json"}
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
+        data = None
+        if body is not None:
+            data = json.dumps(body).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        request = urllib.request.Request(self.base_url + path, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout, context=_ssl_context) as response:
+                raw = response.read().decode("utf-8")
+                return response.status, (json.loads(raw) if raw else {})
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            try:
+                payload = json.loads(raw) if raw else {}
+            except json.JSONDecodeError:
+                payload = {"message": raw[:200]}
+            return exc.code, payload
+
+    @staticmethod
+    def _error(status: int, payload: dict) -> str:
+        reason = {
+            400: "DD rejected the request (check hub_mac/node_id/endpoint)",
+            401: "DD API key missing or rejected",
+            404: "DD node or endpoint not found",
+            423: "DD hub is under emergency lock; control is blocked",
+            500: "DD failed to publish the command",
+        }.get(status, f"DD returned HTTP {status}")
+        detail = payload.get("message") or payload.get("error")
+        return f"{reason}: {detail}" if detail else reason
+
+    def _status_path(self) -> str:
+        mac = urllib.parse.quote(self.hub_mac, safe="")
+        return f"/api/hubs/{mac}/nodes/{self.node_id}/endpoints/{self.endpoint}"
+
+    def status(self) -> dict:
+        try:
+            status, payload = self._call("GET", self._status_path())
+        except (urllib.error.URLError, OSError) as exc:
+            return {"success": False, "message": f"DD unreachable: {exc}"}
+        if status != 200:
+            return {"success": False, "message": self._error(status, payload)}
+        endpoint = payload.get("endpoint") or {}
+        node = payload.get("node") or {}
+        state = str(endpoint.get("current_state", "unknown")).lower()
+        return {
+            "success": True,
+            "message": "Power status",
+            "data": {
+                "state": state if state in {"on", "off"} else "unknown",
+                "updated_at": endpoint.get("updated_at"),
+                "endpoint_name": endpoint.get("endpoint_name"),
+                "node_connected": node.get("is_connected"),
+                "emergency_active": bool(payload.get("emergency_active")),
+            },
+        }
+
+    def set_state(self, on: bool) -> dict:
+        wanted = "ON" if on else "OFF"
+        body = {"hub_mac": self.hub_mac, "node_id": self.node_id, "endpoint": self.endpoint, "state": wanted}
+        try:
+            status, payload = self._call("POST", "/api/endpoints/control", body)
+        except (urllib.error.URLError, OSError) as exc:
+            return {"success": False, "message": f"DD unreachable: {exc}"}
+        if status not in (200, 202):
+            return {"success": False, "message": self._error(status, payload)}
+        deadline = time.monotonic() + self.confirm_timeout
+        last = None
+        while True:
+            current = self.status()
+            if current.get("success"):
+                last = current["data"]
+                if last["state"] == wanted.lower():
+                    return {"success": True, "message": f"Power {wanted.lower()} confirmed", "data": {**last, "confirmed": True}}
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.5)
+        return {
+            "success": True,
+            "message": f"Power {wanted.lower()} accepted; device has not confirmed yet",
+            "data": {**(last or {}), "state": (last or {}).get("state", "unknown"), "confirmed": False, "requested": wanted.lower()},
+        }
+
+    def execute(self, operation: str) -> dict:
+        if operation == "status":
+            return self.status()
+        if operation in {"on", "off"}:
+            return self.set_state(operation == "on")
+        if operation in {"cycle", "reset"}:
+            off = self.set_state(False)
+            if not off["success"]:
+                return off
+            time.sleep(self.cycle_delay)
+            on = self.set_state(True)
+            if on["success"]:
+                on["message"] = f"Power {operation} complete" + ("" if on["data"].get("confirmed") else " (on not yet confirmed)")
+            return on
+        return {"success": False, "message": f"Unsupported power operation '{operation}'"}
+
+
 class PowerRuntime:
     """Relay/reset-line control for resources defined in the local Agent config."""
 
@@ -599,6 +1034,13 @@ class PowerRuntime:
         return max(0.05, min(float(metadata.get("pulse_seconds", 0.5)), 10.0))
 
     def execute(self, operation: str, metadata: dict) -> dict:
+        if str(metadata.get("backend", "")) == "dd":
+            try:
+                return DDPowerClient(metadata).execute(operation)
+            except (KeyError, TypeError, ValueError) as exc:
+                return {"success": False, "message": f"Invalid DD power configuration: {exc}"}
+        if IS_WINDOWS:  # pragma: no cover
+            return {"success": False, "message": "GPIO power is only supported on Linux agents"}
         try:
             gpio = self._backend(metadata)
             line = int(metadata["line"])
@@ -627,6 +1069,9 @@ class PowerRuntime:
         except (OSError, subprocess.SubprocessError) as exc:
             return {"success": False, "message": f"GPIO operation failed: {exc}"}
         return {"success": False, "message": f"Unsupported power operation '{operation}'"}
+
+
+# --------------------------------------------------------------------------- deploy
 
 
 class DeployRuntime:
@@ -693,14 +1138,39 @@ class DeployRuntime:
         }
 
 
+# --------------------------------------------------------------------------- dispatch
+
+
 class OperationRouter:
     """Dispatch hub operations to the runtime for their resource type."""
 
     def __init__(self, config: dict) -> None:
         self.config = config
-        self.serial = SerialRuntime()
+        self._known_serial_paths: set[str] = set()
+        self.serial = SerialRuntime(
+            allowed_paths=self.allowed_serial_paths,
+            idle_timeout=float(config.get("serial_idle_timeout", DEFAULT_SERIAL_IDLE_TIMEOUT)),
+        )
         self.power = PowerRuntime()
         self.deploy = DeployRuntime()
+        self._resource_locks: dict[str, threading.Lock] = {}
+        self._locks_guard = threading.Lock()
+
+    def remember_resources(self, resources: list[dict]) -> None:
+        """Record serial devices from the latest discovery; only these may be opened."""
+        self._known_serial_paths = {
+            str((item.get("metadata") or {}).get("path") or item["resource_key"])
+            for item in resources
+            if item.get("resource_type") == "serial"
+        }
+
+    def allowed_serial_paths(self) -> set[str]:
+        configured = {
+            str((item.get("metadata") or {}).get("path") or item.get("resource_key"))
+            for item in self.config.get("resources", [])
+            if item.get("resource_type") == "serial"
+        }
+        return self._known_serial_paths | configured
 
     def _local_metadata(self, resource_key: str) -> dict | None:
         # Power/deploy settings come from the local config only; the hub's copy is not trusted.
@@ -709,6 +1179,10 @@ class OperationRouter:
                 return item.get("metadata") or {}
         return None
 
+    def _lock_for(self, resource_key: str) -> threading.Lock:
+        with self._locks_guard:
+            return self._resource_locks.setdefault(resource_key, threading.Lock())
+
     def execute(self, payload: dict) -> dict:
         resource_type = str(payload.get("resource_type", ""))
         operation = str(payload.get("operation", "")).strip().lower()
@@ -716,18 +1190,23 @@ class OperationRouter:
         if resource_type == "serial":
             return self.serial.execute(payload)
         if resource_type in {"power", "reset", "deploy"}:
-            metadata = self._local_metadata(str(payload.get("resource_key", "")))
+            resource_key = str(payload.get("resource_key", ""))
+            metadata = self._local_metadata(resource_key)
             if metadata is None:
                 return {"success": False, "message": "Resource is not configured on this Agent"}
-            if resource_type == "deploy":
-                return self.deploy.execute(operation, params, metadata)
-            return self.power.execute(operation, metadata)
+            with self._lock_for(resource_key):
+                if resource_type == "deploy":
+                    return self.deploy.execute(operation, params, metadata)
+                return self.power.execute(operation, metadata)
         return {"success": False, "message": f"Unsupported resource type '{resource_type}'"}
 
 
 def run_operation(config: dict, router: OperationRouter, operation: dict, request_timeout: int) -> None:
     try:
-        execution = router.execute(operation)
+        try:
+            execution = router.execute(operation)
+        except Exception as exc:  # noqa: BLE001 - report instead of letting the hub time out
+            execution = {"success": False, "message": f"Agent error: {exc.__class__.__name__}: {exc}"}
         complete_operation(
             config,
             operation_id=str(operation["id"]),
@@ -748,30 +1227,103 @@ def _handle_stop(_signum: int, _frame: object) -> None:
     _stop.set()
 
 
+class AgentLoop:
+    """Heartbeat thread + operation poller feeding a bounded worker pool."""
+
+    def __init__(self, config: dict, router: OperationRouter) -> None:
+        self.config = config
+        self.router = router
+        self.interval = max(5, int(config.get("heartbeat_interval", DEFAULT_INTERVAL)))
+        self.request_timeout = max(5, int(config.get("request_timeout", DEFAULT_REQUEST_TIMEOUT)))
+        self.poll_wait = max(1, min(int(config.get("operation_poll_wait_seconds", DEFAULT_OPERATION_POLL_WAIT_SECONDS)), 25))
+        self.max_workers = max(1, min(int(config.get("max_concurrent_operations", DEFAULT_MAX_CONCURRENT_OPERATIONS)), 32))
+        self._inflight = threading.Semaphore(self.max_workers)
+        self._pool = ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix="op")
+        self._secrets = [str(config.get("credential", ""))]
+
+    def _warn(self, message: str) -> None:
+        log.warning(_redact(message, self._secrets))
+
+    def heartbeat_loop(self) -> None:
+        delay = 0
+        while not _stop.is_set():
+            try:
+                resources = discover_resources(self.config)
+                self.router.remember_resources(resources)
+                heartbeat(self.config, request_timeout=self.request_timeout, resources=resources)
+                self.router.serial.reap_idle()
+                delay = 0
+                sd_notify("WATCHDOG=1")
+                _stop.wait(self.interval)
+            except Exception as exc:  # keep the service alive through transient failures
+                delay = _next_retry_delay(delay)
+                self._warn(f"heartbeat error: {exc}; retrying in {delay}s")
+                _stop.wait(_jittered(delay))
+
+    def _run(self, operation: dict) -> None:
+        try:
+            run_operation(self.config, self.router, operation, self.request_timeout)
+        finally:
+            self._inflight.release()
+
+    def poll_loop(self) -> None:
+        delay = 0
+        while not _stop.is_set():
+            if not self._inflight.acquire(timeout=1):
+                continue
+            try:
+                result = poll_operation(
+                    self.config,
+                    wait_seconds=self.poll_wait,
+                    request_timeout=max(self.request_timeout, self.poll_wait + 10),
+                )
+                delay = 0
+            except Exception as exc:
+                self._inflight.release()
+                delay = _next_retry_delay(delay)
+                self._warn(f"operation poll error: {exc}; retrying in {delay}s")
+                _stop.wait(_jittered(delay))
+                continue
+            operation = result.get("operation")
+            if not operation:
+                self._inflight.release()
+                continue
+            self._pool.submit(self._run, operation)
+
+    def run(self) -> None:
+        threads = [
+            threading.Thread(target=self.heartbeat_loop, name="heartbeat", daemon=True),
+            threading.Thread(target=self.poll_loop, name="poller", daemon=True),
+        ]
+        for thread in threads:
+            thread.start()
+        sd_notify("READY=1")
+        while not _stop.wait(1):
+            pass
+        for thread in threads:
+            thread.join(timeout=self.poll_wait + 15)
+        self._pool.shutdown(wait=True, cancel_futures=True)
+
+
 def main() -> int:
-    ensure_linux()
+    ensure_supported_platform()
     parser = argparse.ArgumentParser(description="TargetHub Agent")
-    parser.add_argument("--config", default="/etc/targethub-agent/config.json")
+    parser.add_argument("--config", default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--insecure", action="store_true", help="allow a plain http:// TargetHub URL")
+    parser.add_argument("--version", action="version", version=f"targethub-agent {AGENT_VERSION}")
     args = parser.parse_args()
-    # journald captures stderr and adds timestamps.
+    # journald / the Windows task log capture stderr and add timestamps.
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", stream=sys.stderr)
     signal.signal(signal.SIGTERM, _handle_stop)
     signal.signal(signal.SIGINT, _handle_stop)
+    if hasattr(signal, "SIGBREAK"):  # pragma: no cover - Windows console close
+        signal.signal(signal.SIGBREAK, _handle_stop)
 
     config_path = Path(args.config)
     config = load_config(config_path)
     validate_hub_url(config, args.insecure)
     configure_tls(config)
-    interval = max(5, int(config.get("heartbeat_interval", DEFAULT_INTERVAL)))
     request_timeout = max(5, int(config.get("request_timeout", DEFAULT_REQUEST_TIMEOUT)))
-    operation_poll_wait_seconds = max(
-        1,
-        min(
-            int(config.get("operation_poll_wait_seconds", DEFAULT_OPERATION_POLL_WAIT_SECONDS)),
-            interval,
-        ),
-    )
 
     enrollment_delay = 0
     while config.get("enrollment_token") and not _stop.is_set():
@@ -795,57 +1347,19 @@ def main() -> int:
     if not config.get("agent_id") or not config.get("credential"):
         raise RuntimeError("Agent is not enrolled. Provide an enrollment token in the configuration.")
 
-    log.info("TargetHub Agent running as %s", config["agent_id"])
-    sd_notify("READY=1")
+    log.info(
+        "TargetHub Agent %s running as %s on %s (serial backend: %s)",
+        AGENT_VERSION,
+        config["agent_id"],
+        sys.platform,
+        "pyserial" if _pyserial is not None else "termios",
+    )
     router = OperationRouter(config)
-    failure_delay = 0
-    next_heartbeat_due = 0.0
-    worker: threading.Thread | None = None
-    while not _stop.is_set():
-        sd_notify("WATCHDOG=1")
-        try:
-            if time.monotonic() >= next_heartbeat_due:
-                heartbeat(config, request_timeout=request_timeout)
-                next_heartbeat_due = time.monotonic() + interval
-
-            if worker is not None and worker.is_alive():
-                # An operation is running: keep heartbeating but do not claim another.
-                _stop.wait(1)
-                continue
-
-            poll_timeout = max(request_timeout, operation_poll_wait_seconds + 5)
-            poll_result = poll_operation(
-                config,
-                wait_seconds=operation_poll_wait_seconds,
-                request_timeout=poll_timeout,
-            )
-            operation = poll_result.get("operation")
-            if operation:
-                worker = threading.Thread(
-                    target=run_operation,
-                    args=(config, router, operation, request_timeout),
-                    daemon=True,
-                )
-                worker.start()
-            failure_delay = 0
-        except Exception as exc:  # keep the service alive through transient failures
-            failure_delay = _next_retry_delay(failure_delay)
-            secrets = [
-                str(config.get("credential", "")),
-                str(config.get("enrollment_token", "")),
-            ]
-            log.warning(
-                _redact(
-                    f"heartbeat/operation error: {exc}; retrying in {failure_delay}s",
-                    secrets,
-                )
-            )
-            _stop.wait(_jittered(failure_delay))
-
-    if worker is not None:
-        worker.join(timeout=10)
-    sd_notify("STOPPING=1")
-    router.serial.close_all()
+    try:
+        AgentLoop(config, router).run()
+    finally:
+        sd_notify("STOPPING=1")
+        router.serial.close_all()
     log.info("TargetHub Agent stopped")
     return 0
 

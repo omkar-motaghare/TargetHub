@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class ReservationCreate(BaseModel):
     target_id: str = Field(min_length=1)
-    user_id: str = Field(min_length=1, max_length=100)
+    user_id: str | None = Field(default=None, min_length=1, max_length=100)
     starts_at: datetime
     ends_at: datetime
 
