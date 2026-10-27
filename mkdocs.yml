@@ -1,1 +1,42 @@
-site_name: My Docs
+site_name: TargetHub
+site_description: Embedded lab orchestration - reservations, serial consoles, power and deploy
+repo_url: https://github.com/omkar-motaghare/TargetHub
+edit_uri: edit/develop/docs/
+theme:
+  name: material
+  features: [navigation.sections, content.code.copy, search.suggest]
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.tasklist:
+      custom_checkbox: true
+nav:
+  - Home: index.md
+  - Getting started:
+      - Installation: getting-started/install.md
+  - Guides:
+      - Using TargetHub: user-guide/using-targethub.md
+      - Administration: admin-guide/administration.md
+      - Agents (Linux, Pi, Windows): agents/agent-guide.md
+      - Raspberry Pi: agents/raspberry-pi.md
+      - DD power system: power/dd-power.md
+      - CLI, SDK and CI: automation/ci-hil.md
+  - Operations:
+      - Upgrade and rollback: operations/upgrade.md
+      - Backup and restore: deployment/backup.md
+      - TLS and network: deployment/tls.md
+      - Troubleshooting: operations/troubleshooting.md
+      - Security: operations/security.md
+      - Manual verification checklist: MANUAL_VERIFICATION_CHECKLIST.md
+  - Reference:
+      - Architecture: architecture/overview.md
+      - Agent protocol: agents/agent-operations.md
+  - Development:
+      - Development guide: developer-guide/local-docker-development.md
+      - Simulators and demo lab: development/simulators.md
+      - Roadmap: development/ROADMAP.md
+not_in_nav: |
+  project-journal/*

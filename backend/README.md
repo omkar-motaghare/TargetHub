@@ -36,8 +36,9 @@ bash scripts/bootstrap-backend.sh
 
 - The backend package is `app` inside `backend/`.
 - Docker builds from the `backend/` context.
-- The backend dashboard is served by the FastAPI application under `backend/app/web/`.
-- This dashboard is temporary migration fallback/reference UI while the React frontend becomes feature-complete.
+- The web UI is the React app in `frontend/`; its build is served from `backend/app/web/react/` at `/app`.
+- `backend/app/web/agent/` holds the agent and its installers, downloaded by enrollment commands from `/web/agent/`.
+- `python -m app.manage --help` is the server-console admin tool (list users, reset passwords, create an admin).
 
 ## Authentication and first-admin bootstrap
 

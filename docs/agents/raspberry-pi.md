@@ -1,70 +1,54 @@
-# Installing the Agent on a Raspberry Pi (aarch64)
+# Raspberry Pi as a lab agent
 
-> **Status:** the agent is stdlib-only Python and the installer/unit are tested on an x86_64 Linux dev host
-> (installer `--prefix` dry run, `systemd-analyze verify`, live E2E with a pty serial loopback and a fake sysfs GPIO tree).
-> It has **not** been run on real Raspberry Pi hardware yet. Treat the steps below as the intended procedure and
-> report anything that differs on a real board.
+A Raspberry Pi 4 or 5 makes a good agent: it sits next to the boards, takes USB-serial adapters and a relay
+HAT, and needs only outbound network access. Follow the [agent guide](agent-guide.md); this page lists
+the Pi-specific details.
 
-## Requirements
+## Prepare the Pi
 
-- Raspberry Pi OS (Bookworm or later, 64-bit/aarch64 recommended; 32-bit armv7 should also work) or any systemd Linux.
-- `python3` (3.9+), `curl`, `sha256sum`, `systemd`. No pip packages are needed.
-- Outbound HTTPS to the hub. No inbound ports are opened.
-- Optional for GPIO power control: the `gpiod` tools (`sudo apt install gpiod`) if you use the `gpiod` backend.
+- Raspberry Pi OS Bookworm (64-bit recommended; 32-bit armv7 also works), or any systemd Linux such as Ubuntu or Yocto.
+- `sudo apt install python3 curl gpiod`. No pip packages are needed.
+- Give it a stable hostname and a DHCP reservation, and keep the clock synced (`timedatectl`). Reservation
+  times and TLS both depend on it.
+- Prefer a powered USB hub for several USB-serial adapters.
 
 ## Install
 
-1. In the TargetHub UI open **Admin → Agents**, enter an agent name and create an enrollment (token valid 30 minutes, single use).
-2. Run the displayed command on the Pi. It downloads the installer, checks its sha256, then runs it with the agent's expected sha256:
+Run the **Linux** enrollment command from **Admin → Agents**. The installer:
+
+- creates the `targethub` system user and adds it to `dialout`, `gpio` and `plugdev` when they exist;
+- installs `/opt/targethub-agent/targethub_agent.py` and `/etc/targethub-agent/<instance>.json` (0600);
+- enables `targethub-agent@<instance>.service` (hardened: `NoNewPrivileges`, `ProtectSystem=strict`,
+  `MemoryMax=64M`, 120 s watchdog);
+- works on minimal/BusyBox images without `curl`, `useradd` or `getent` (falls back to `wget`/Python and `adduser`).
+
+## GPIO relays
 
 ```bash
-curl -fsSL https://<hub>/web/agent/install.sh -o targethub-install.sh
-echo '<installer-sha256>  targethub-install.sh' | sha256sum -c -
-sudo bash targethub-install.sh --targethub-url 'https://<hub>' \
-  --enrollment-token '<one-time-token>' --agent-sha256 <agent-sha256>
+gpioinfo                     # list chips and lines
+gpioset gpiochip0 17=1       # libgpiod v1 syntax; quick manual relay test
 ```
 
-The installer creates the `targethub` system user (added to `dialout`, `gpio`, `plugdev` when those groups exist),
-installs `/opt/targethub-agent/targethub_agent.py`, writes `/etc/targethub-agent/<instance>.json` (mode 0600) and enables
-`targethub-agent@<instance>.service`. Check it with:
+- Pi 4 and earlier: header GPIOs are on `gpiochip0`. Pi 5: usually `gpiochip4` (check `gpioinfo`).
+- Use `"backend": "gpiod"`. The legacy `sysfs` interface is gone on current kernels.
+- Most relay HATs are active-low (`"active_low": true`).
+- Never switch a target's supply directly from a GPIO pin; use a relay board or driver stage.
 
-```bash
-systemctl status 'targethub-agent@*'
-journalctl -u 'targethub-agent@*' -f
-```
+## Serial
 
-The unit sets `MemoryMax=64M`, `NoNewPrivileges`, `ProtectSystem=strict` and a 120 s watchdog.
+Use the stable names under `/dev/serial/by-id/`. The Pi's own UART (`/dev/ttyAMA0`, `/dev/serial0`) can be
+declared too; disable the serial login console first (`raspi-config` → Interface → Serial: login shell
+*No*, hardware *Yes*).
 
-## Declaring serial, power and deploy resources
+## Running the TargetHub server on a Pi
 
-Hardware is declared in the agent-local config (never accepted from the hub). Edit `/etc/targethub-agent/<instance>.json`
-and add entries to `resources`, then `sudo systemctl restart targethub-agent@<instance>`:
+The published image is multi-arch (`linux/arm64`), so a Pi 5 with 4 GB+ RAM and an SSD can host a small
+lab's server too: install Docker (`curl -fsSL https://get.docker.com | sh`) and use
+`scripts/install.sh --image ghcr.io/omkar-motaghare/targethub:0.2.0`.
 
-```json
-"resources": [
-  {"resource_key": "/dev/ttyUSB0", "resource_type": "serial", "display_name": "DUT console",
-   "metadata": {"path": "/dev/ttyUSB0", "baudrate": 115200, "timeout": 0.5}},
-  {"resource_key": "power:relay1", "resource_type": "power", "display_name": "Relay 1",
-   "metadata": {"backend": "gpiod", "chip": "gpiochip0", "line": 17, "active_low": true, "pulse_seconds": 0.5}},
-  {"resource_key": "deploy:flash", "resource_type": "deploy", "display_name": "Flash",
-   "metadata": {"command": ["cp", "{artifact}", "/media/dut/firmware.bin"]}}
-]
-```
+## Verification status
 
-Notes:
-
-- Use the `sysfs` backend only on kernels that still expose `/sys/class/gpio`; Bookworm kernels generally need `gpiod`.
-  On a Pi 5 the header GPIO chip is usually `gpiochip4` (`gpioinfo` lists chips and lines).
-- `ReadWritePaths` in the unit allows `/sys/class/gpio`; the `gpiod` backend needs the `targethub` user in the `gpio` group.
-- Prefer stable serial names such as `/dev/serial/by-id/...`; the agent discovers `ttyUSB*`, `ttyACM*` and by-id links.
-- Wire relays/reset lines through proper drivers; a Pi GPIO pin must never switch a target supply directly.
-
-## Uninstall
-
-```bash
-sudo systemctl disable --now 'targethub-agent@<instance>.service'
-sudo rm /etc/systemd/system/targethub-agent@.service
-sudo rm -r /opt/targethub-agent /etc/targethub-agent
-```
-
-Then revoke the agent in the UI.
+The agent was verified on a Raspberry Pi 5 (Yocto, read-only NFS root) for enrollment, discovery, pty
+serial, fake-GPIO power, restart and offline detection in 0.1.0. The 0.2.0 agent (concurrent operations,
+buffered serial, DD fallback) is tested on x86_64 Linux and with simulators. Please run the
+[manual verification checklist](../MANUAL_VERIFICATION_CHECKLIST.md) on a real Pi with a relay and a board.

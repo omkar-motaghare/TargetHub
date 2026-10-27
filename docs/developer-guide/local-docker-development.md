@@ -1,245 +1,89 @@
-# TargetHub Local Development with Docker
+# Development guide
 
-This is the standard local development and verification path for TargetHub.
+## Layout
 
-## Prerequisites
+| Path | What | Stack |
+| --- | --- | --- |
+| `backend/app` | API, services, repositories, providers, scheduler | Python 3.12, FastAPI, SQLAlchemy 2, Alembic, Pydantic 2 |
+| `backend/app/web/agent` | Agent (`targethub_agent.py`) and its installers (`install.sh`, `install.ps1`) | Python 3.9+ stdlib (+ pyserial on Windows) |
+| `backend/tests` | Unit, API, migration, installer and live-agent end-to-end tests | pytest |
+| `frontend` | Web UI | React 18, react-router 7, Vite 7, xterm.js, Vitest, Playwright |
+| `sdk/python` | SDK and `targethub` CLI | httpx |
+| `vscode-extension` | VS Code extension | TypeScript |
+| `tools` | DD mock, virtual board, demo lab | stdlib Python |
 
-- Git
-- Docker Desktop (Windows/macOS) or Docker Engine + Docker Compose plugin (Linux)
+Key backend concepts:
 
-Python and a local Python virtual environment are **not required** for the standard development workflow.
+- **Reservation** (who owns a target, when) → **Session** (one capability of a reserved target) →
+  **operation** (power `on`, serial `read`, `deploy`, …) executed by a **provider**.
+- Providers run on the server (DD, HTTP power, HTTP bridges) or are proxied to an **agent** through the
+  `agent_operations` queue (`services/agent_operation_service.py`). Agents long-poll; claims are atomic
+  conditional updates; in-process signals wake waiters immediately.
+- The serial console WebSocket (`api/v1/serial_ws.py`) pumps agent reads into the socket and writes input back.
+- `services/scheduler.py` runs maintenance every 30 s in each worker: expiry, ending-soon warnings, waitlist,
+  agent liveness, retention. Every step is idempotent.
 
-## 1. Get the latest `develop` branch
-
-```bash
-git checkout develop
-git pull origin develop
-```
-
-Confirm the branch:
-
-```bash
-git branch --show-current
-git log -1 --oneline
-```
-
-## 2. Optional: create a local environment file
-
-Copy the example file:
+## Run everything from source
 
 ```bash
-cp .env.example .env
+bash scripts/bootstrap-backend.sh                  # backend/.venv with runtime + test deps
+cd backend
+export SECRET_KEY=dev-secret-key-that-is-long-enough ENVIRONMENT=development ADMIN_BOOTSTRAP_TOKEN=dev
+.venv/bin/alembic upgrade head                     # SQLite targethub.db by default
+.venv/bin/uvicorn app.main:app --reload --port 8000
+
+cd ../frontend && npm ci && npm run dev            # http://localhost:5173, proxies /api to :8000
 ```
 
-On Windows PowerShell:
+`ENVIRONMENT=development` enables simulated providers. Start the [demo lab](../development/simulators.md)
+for realistic hardware without boards.
 
-```powershell
-Copy-Item .env.example .env
-```
-
-For local development, the Compose file also provides a development-only default secret, so `.env` is optional.
-
-Do not commit a real secret to Git.
-
-## 3. Build and start TargetHub
-
-From the repository root:
+## Tests
 
 ```bash
-docker compose up --build
+# Backend (≈250 tests, ~1 min). Set TARGETHUB_PWSH to run PowerShell installer tests too.
+backend/.venv/bin/python -m pytest -q backend/tests
+backend/.venv/bin/ruff check backend/app backend/tests tools sdk/python --config backend/pyproject.toml
+
+# Live end-to-end: real server + real agent process + pty serial loopback
+bash scripts/e2e-agent.sh
+
+# Frontend
+cd frontend && npm run typecheck && npm test && npm run build
+
+# Browser smoke (builds the SPA, starts a server, drives Chrome with Playwright)
+PLAYWRIGHT_CHANNEL=chrome bash scripts/e2e-ui.sh       # or PLAYWRIGHT_CHROMIUM_PATH=/path/to/chrome
+
+# SDK and VS Code extension
+cd sdk/python && pip install -e ".[test]" && pytest -q
+cd vscode-extension && npm ci && npm run compile && npm test && npm run package
 ```
 
-The container automatically runs the Alembic migrations before starting FastAPI/Uvicorn.
+CI (`.github/workflows/ci.yml`) runs all of these plus PostgreSQL migrations, Windows agent/installer tests
+and a Docker build-and-boot check. `release.yml` publishes the multi-arch image and release assets on
+`v*` tags.
 
-TargetHub is then available at:
-
-- Dashboard: http://localhost:8000/dashboard
-- API documentation: http://localhost:8000/docs
-- API root: http://localhost:8000/
-
-## 4. Run in the background
-
-For the normal developer workflow:
+## Database migrations
 
 ```bash
-docker compose up --build -d
+cd backend
+.venv/bin/alembic revision -m "describe change"   # write upgrade() and downgrade() by hand
+.venv/bin/alembic upgrade head && .venv/bin/alembic downgrade -1 && .venv/bin/alembic upgrade head
 ```
 
-Check the container:
+Update `EXPECTED_HEAD` in `tests/test_migrations_lifecycle.py`. Use the `UTCDateTime` column type for
+timestamps (SQLite otherwise drops the timezone).
+
+## Docker
 
 ```bash
-docker compose ps
-```
-
-View logs:
-
-```bash
+docker compose up -d --build          # needs .env; scripts/install.sh --no-start creates one
 docker compose logs -f api
 ```
 
-## 5. Verify the application
+## Conventions
 
-Open the dashboard:
-
-```text
-http://localhost:8000/dashboard
-```
-
-Open Swagger:
-
-```text
-http://localhost:8000/docs
-```
-
-Check the API root:
-
-```bash
-curl http://localhost:8000/
-```
-
-Expected response is similar to:
-
-```json
-{
-  "application": "TargetHub",
-  "version": "0.1.0",
-  "status": "running"
-}
-```
-
-Create the first admin user (bootstrap is one-time):
-
-```bash
-curl -X POST http://localhost:8000/api/v1/auth/bootstrap \
-    -H "Content-Type: application/json" \
-    -d '{"username":"admin","password":"admin1234","bootstrap_token":"<ADMIN_BOOTSTRAP_TOKEN>"}'
-```
-
-Get an access token:
-
-```bash
-TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/token \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "username=admin&password=admin1234&grant_type=" | \
-    /home/omkar_motaghare/TargetHub/backend/.venv/bin/python -c "import json,sys; print(json.load(sys.stdin).get('access_token',''))")
-```
-
-Check targets:
-
-```bash
-curl http://localhost:8000/api/v1/targets -H "Authorization: Bearer $TOKEN"
-```
-
-Check reservations:
-
-```bash
-curl http://localhost:8000/api/v1/reservations -H "Authorization: Bearer $TOKEN"
-```
-
-## 6. Stop TargetHub
-
-```bash
-docker compose down
-```
-
-The database and runtime state remain in named Docker volumes:
-`targethub_postgres_data`, `targethub_redis_data`, and `targethub_minio_data`.
-
-To remove the application container **and** the local database volume:
-
-```bash
-docker compose down -v
-```
-
-Use `down -v` only when you intentionally want to reset the local database.
-
-## 7. Rebuild after code changes
-
-When source or dependency changes require a new image:
-
-```bash
-docker compose up --build -d
-```
-
-To force a completely fresh image build:
-
-```bash
-docker compose build --no-cache
-docker compose up -d
-```
-
-## 8. Database migrations
-
-Migrations are applied automatically when the container starts:
-
-```text
-Container start
-      |
-      v
-alembic upgrade heads
-      |
-      v
-uvicorn app.main:app
-```
-
-The canonical Docker runtime uses PostgreSQL persisted in Docker volume
-`targethub_postgres_data`.
-
-Do not manually run Alembic from a host Python virtual environment for the normal Docker workflow.
-
-## 9. Development workflow
-
-The intended workflow is:
-
-```text
-Pull develop
-    |
-    v
-Make code changes
-    |
-    v
-Docker Compose rebuild
-    |
-    v
-Open /dashboard and /docs
-    |
-    v
-Verify feature
-    |
-    v
-Commit to develop
-```
-
-## 10. Troubleshooting
-
-### API container exits immediately
-
-Inspect logs:
-
-```bash
-docker compose logs api
-```
-
-### Port 8000 is already in use
-
-Stop the conflicting service or change the host-side port in `docker-compose.yml`, for example:
-
-```yaml
-ports:
-  - "8080:8000"
-```
-
-Then use http://localhost:8080/dashboard.
-
-### Reset local development data
-
-```bash
-docker compose down -v
-docker compose up --build -d
-```
-
-This recreates the database from the current Alembic migrations.
-
-## Architecture note
-
-Docker is the standard local deployment mechanism for the current development workflow. The same containerized application model will also support the team-hosted deployment described by Architecture v1.0; the final production packaging and appliance image will be refined later.
+- Business rules live in services; routes stay thin; repositories own queries.
+- Never put secrets in `provider_config`; reference environment variable names.
+- Anything an agent executes must be declared in the agent's local config.
+- New features come with tests and a docs update; user-visible changes go in `CHANGELOG.md`.

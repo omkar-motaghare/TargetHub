@@ -1,39 +1,58 @@
 # TLS and network exposure
 
-Agents send long-lived credentials to the hub, so production hubs must be served over HTTPS.
-The agent refuses `http://` hub URLs unless `allow_insecure_http` is set (lab/dev only).
+Agents send long-lived credentials and users send passwords, so production servers must be served over
+HTTPS. Agents refuse `http://` server URLs unless `allow_insecure_http` is set (closed lab networks only).
 
 ## Caddy (automatic certificates)
 
 ```bash
-export SECRET_KEY=$(openssl rand -hex 32) POSTGRES_PASSWORD=$(openssl rand -hex 16)
-export TARGETHUB_DOMAIN=hub.example.com TARGETHUB_PUBLIC_URL=https://hub.example.com
-docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build
+scripts/install.sh --domain hub.example.com          # Linux/macOS
+.\scripts\install.ps1 -Domain hub.example.com        # Windows
 ```
 
-`docker-compose.tls.yml` adds a Caddy container on 80/443 with Let's Encrypt certificates,
-removes the API's host port mapping, and returns 404 for `/metrics` on the public listener.
-`docker/Caddyfile` sets HSTS and `nosniff`. Postgres, Redis and MinIO are bound to
-`127.0.0.1` in the base compose files and need `POSTGRES_PASSWORD` to be set.
+This adds `docker-compose.tls.yml`: a Caddy container on ports 80/443 with Let's Encrypt certificates
+(needs a public DNS name pointing at the host), removes the API's host port, and returns 404 for `/metrics`
+on the public listener. `docker/Caddyfile` sets HSTS, `nosniff` and `Referrer-Policy`. WebSockets (the serial
+console) pass through without extra configuration.
 
-`TARGETHUB_PUBLIC_URL` must be the HTTPS URL: the enrollment install command shown in the
-admin UI is built from it.
+`TARGETHUB_PUBLIC_URL` must be the HTTPS URL: agent install commands are built from it.
 
-## Own certificates / other proxies
+For an internal CA or a name without public DNS, replace the site block in `docker/Caddyfile` with
+`tls /certs/hub.crt /certs/hub.key` and mount the files into the Caddy container.
 
-Any reverse proxy works: forward to `api:8000`, preserve the `X-Request-ID` header, and keep
-the long-poll route `/api/v1/agents/*/operations/poll` timeout above 30 s. Agents trust the
-system CA store; for a private CA set `ca_bundle` in the agent config.
+## Your own reverse proxy
+
+Forward to the API port (`TARGETHUB_BIND`/`TARGETHUB_PORT`, default `127.0.0.1:8000` behind a proxy) and:
+
+- pass WebSocket upgrades for `/api/v1/sessions/*/serial/ws`;
+- allow at least 60 s idle time on `/api/v1/agents/*/operations/poll` (long-poll) and the WebSocket;
+- preserve or set `X-Request-ID` if you want end-to-end correlation;
+- keep `/metrics` internal.
+
+nginx example:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;   # map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 300s;
+}
+```
+
+Agents trust the system CA store; for a private CA set `ca_bundle` in the agent config. The CLI/SDK honour
+`TARGETHUB_CA_BUNDLE`.
 
 ## Metrics and logs
 
-- `/metrics` is unauthenticated; keep it off the public listener (the Caddyfile does).
-- Set `TARGETHUB_LOG_FORMAT=json` for one JSON object per line on stdout (each record carries
-  `extra.request_id`); `TARGETHUB_LOG_DIR` relocates the rotating file log.
-- Every response carries `X-Request-ID`; a client-supplied `X-Request-ID` matching
-  `[A-Za-z0-9._-]{8,64}` is reused so traces can be correlated end to end.
+- `/metrics` requires `Authorization: Bearer $METRICS_TOKEN` (or an admin token). Keep it on the internal network.
+- `TARGETHUB_LOG_FORMAT=json` emits one JSON object per line on stdout (each record carries `extra.request_id`).
+- Every response carries `X-Request-ID`; a client-supplied value matching `[A-Za-z0-9._-]{8,64}` is reused.
 
 ## Verification status
 
-The compose overlay is validated with `docker compose config`; certificate issuance was not
-exercised (needs a public DNS name).
+The compose overlay is validated with `docker compose config`. Certificate issuance needs a public DNS
+name and was not exercised in development.

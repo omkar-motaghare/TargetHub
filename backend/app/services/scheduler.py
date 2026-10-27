@@ -20,8 +20,9 @@ from app.db.models.tokens import RefreshToken
 from app.models.agent import Agent
 from app.models.agent_operation import AgentOperation
 from app.models.audit import AuditLog
-from app.models.lab import Notification
+from app.models.lab import Notification, WaitlistEntry
 from app.models.reservation import Reservation
+from app.models.session import TargetSession
 from app.models.target import Target
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.reservation_repository import ReservationRepository
@@ -134,6 +135,14 @@ def run_maintenance(db: Session, now: datetime | None = None) -> dict[str, int]:
     metrics.set_gauge(
         "targethub_agents_online",
         float(db.query(Agent).filter(Agent.status == "online").count()),
+    )
+    metrics.set_gauge(
+        "targethub_sessions_active",
+        float(db.query(TargetSession).filter(TargetSession.status == "active").count()),
+    )
+    metrics.set_gauge(
+        "targethub_waitlist_waiting",
+        float(db.query(WaitlistEntry).filter(WaitlistEntry.status == "waiting").count()),
     )
     return stats
 

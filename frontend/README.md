@@ -1,62 +1,22 @@
-# TargetHub Frontend (Canonical)
+# TargetHub web UI
 
-React + TypeScript in this package is the only supported product frontend.
-
-The backend dashboard under backend/app/web is migration fallback/reference only and must not receive independent feature-completion work.
-
-## Local development
+React 18 + TypeScript + Vite. The production build is copied into the server image and served at `/app`.
 
 ```bash
-cd frontend
-npm install
-npm run dev
+npm ci
+npm run dev          # http://localhost:5173; /api and /web are proxied to a backend on :8000
+                     # (TARGETHUB_DEV_API=http://other-host:8000 npm run dev to change it)
+npm run typecheck
+npm test             # Vitest unit tests
+npm run build        # dist/ (the Docker build does this for you)
 ```
 
-Default dev URL: http://localhost:5173
-
-If backend runs on another origin:
+Browser smoke test against a real server (from the repository root):
 
 ```bash
-VITE_API_URL=http://localhost:8000/api/v1 npm run dev
+PLAYWRIGHT_CHANNEL=chrome bash scripts/e2e-ui.sh      # or PLAYWRIGHT_CHROMIUM_PATH=/path/to/chrome
 ```
 
-## Validation
-
-Unit tests:
-
-```bash
-npm run test
-```
-
-Production build:
-
-```bash
-npm run build
-```
-
-API smoke flow (from repository root):
-
-```bash
-TARGETHUB_ADMIN_USER=admin TARGETHUB_ADMIN_PASS=change-me-now ./scripts/frontend_smoke_api.sh
-```
-
-This smoke verifies:
-
-- login
-- target creation with capability
-- reservation
-- session open
-- operation discovery/read
-- session close
-- reservation release
-
-Browser smoke checklist:
-
-- docs/FRONTEND_BROWSER_SMOKE_TEST.md
-
-## Deployment notes
-
-- React is the canonical UI path for operations.
-- Canonical backend-served UI route is http://localhost:8000/app (with /dashboard as alias).
-- Legacy fallback remains reachable at http://localhost:8000/legacy-dashboard during migration.
-- Production docs and operations runbooks must describe React as the supported frontend.
+Structure: `src/pages` (user pages, `pages/Admin/*` for administration), `src/components`
+(serial console, notification bell, badges), `src/services` (API client with token refresh, auth
+context, types), `src/utils`.

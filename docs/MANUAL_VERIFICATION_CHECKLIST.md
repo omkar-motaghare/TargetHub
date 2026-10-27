@@ -1,145 +1,123 @@
-# TargetHub Manual Verification Checklist
+# TargetHub manual verification checklist (0.2.0)
 
-**Purpose:** Track manual, in-depth verification of each functionality area before treating it as
-"done" — both backend/API behavior and the UI built on top of it. Existing automated tests passing
-does not mean a feature is verified for real product use; use this checklist to confirm behavior,
-UX, and edge cases by hand.
+**Purpose:** confirm by hand, on real infrastructure, what automated tests and simulators cannot. Mark
+items `[x]` when verified and log anything that fails in the findings table at the end, with the date.
 
-**How to use:** Work through each area. Mark items `[x]` when verified, and add a short note (date,
-result, bug reference) next to any item that fails or is deferred. Keep this file updated as the
-running source of truth for verification status — do not lose progress between sessions.
+**What automation already covers (Linux dev host, simulators):** ~250 backend tests (API, auth, roles,
+reservations, waitlist, scheduler, DD driver against the mock, agent runtime with a pty serial device,
+migrations up/down, installers incl. PowerShell under pwsh), a live server + real agent end-to-end run,
+Playwright browser smoke, and the simulated demo lab (`tools/verify_demo_lab.py`) passing in production
+mode. **Never exercised:** real DD hardware, a real Raspberry Pi relay, a Windows agent on Windows, a real
+board, the Docker image on your hosts, HTTPS certificates.
 
----
-
-## 1. Authentication
-
-- [ ] Bootstrap: first admin creation works only once / is protected (cannot silently create a
-      second bootstrap admin via the same path).
-- [ ] Login with correct credentials issues a token; wrong username/password fails cleanly.
-- [ ] Token expiry: token actually expires (currently 15 min default) and an expired token is
-      rejected with 401, not 500.
-- [ ] `GET /auth/me` returns correct username + roles.
-- [ ] Passwords are hashed (not stored/returned as plaintext) in the DB.
-- [ ] No lockout/rate-limiting on login currently exists — confirm whether this is acceptable for
-      v1 or needs to be flagged as a gap.
-
-## 2. RBAC (roles & privileges)
-
-> Note: today only two effective tiers exist — `admin` vs any authenticated user. No
-> `operator`/`viewer`/etc. yet. Confirm this matches product intent, or flag as a gap.
-
-- [ ] As **admin**: can create users, create/edit/delete targets & capabilities, manage agents
-      (enroll/enable/disable/revoke), view audit log, force-release reservations.
-- [ ] As **non-admin/regular user**: every admin-only action correctly returns 403 (test via direct
-      API call, not just UI visibility).
-- [ ] Regular user *can* do what they should: view targets, reserve, open/close own sessions, view
-      own reservations.
-- [ ] Regular user **cannot** see/act on another user's reservations or sessions (ownership check),
-      except via admin override.
-- [ ] Role field cannot be self-escalated by a non-admin (e.g. user edits their own roles via API).
-
-## 3. Targets & Capabilities (admin config)
-
-- [ ] Create/edit/delete a Target.
-- [ ] Add/edit/delete a Capability under a target, bound to an `agent_id` + `resource_id`.
-- [ ] Invalid/nonexistent `agent_id`/`resource_id` is rejected, not silently accepted.
-- [ ] `provider_config` validation per provider type (power, network, deployment, debugger, serial)
-      — test both valid and intentionally invalid configs for each.
-- [ ] Non-admin users can list/view targets but do not see overly sensitive fields (previously
-      flagged as a security gap — confirm what's actually exposed today).
-
-## 4. Agents
-
-- [ ] Enroll a new agent (via enrollment token flow) — confirm token single-use / expiry behavior.
-- [ ] Agent heartbeat: "online/offline" status updates correctly on a sane timeout.
-- [ ] Resource discovery: discovered resources from an agent show up and can be mapped to a
-      capability.
-- [ ] Disable / enable / revoke-credential actions on an agent — confirm a revoked/disabled agent
-      can no longer talk to the server.
-- [ ] Re-enrollment of a previously disabled/revoked agent works (documented "safe re-enrollment"
-      feature — test explicitly).
-
-## 5. Reservations
-
-- [ ] Reserve a target for a time window; overlapping reservations are rejected — including under
-      **concurrent** requests (known race-condition risk; stress-test manually).
-- [ ] Release own reservation.
-- [ ] Attempt to release someone else's reservation as non-admin → fails.
-- [ ] Admin force-release → always succeeds, and is audited.
-- [ ] Session creation is blocked outside the reserved time window.
-
-## 6. Sessions
-
-- [ ] Open a session bound to a capability only within an active reservation window.
-- [ ] A user who doesn't own the reservation cannot open a session against it.
-- [ ] Session expiry: session becomes unusable after expiry/close; provider calls fail cleanly
-      afterward.
-- [ ] Closing a session explicitly releases resources (agent side too, not just the DB row).
-
-## 7. Providers / Operations
-
-> Test simulated **and** real mode where available.
-
-- [ ] **Serial**: open/read/write/close through an agent-backed session (the one real
-      hardware-vertical-slice — prioritize this).
-- [ ] **Power**: status/on/off/reset/cycle, both simulated and real-mode config; unreachable
-      controller and timeout behavior.
-- [ ] **Network**: info + exec, allowlist enforcement (disallowed command is rejected),
-      unreachable/timeout behavior.
-- [ ] **Deployment**: deploy + status; unsafe artifact paths (absolute path / `../`) are rejected;
-      timeout behavior.
-- [ ] **Debugger/J-Link**: attach/halt/resume/reset/detach + status; auth-missing and unreachable
-      behavior.
-- [ ] For every provider: operations are blocked if the session is not active/owned/expired
-      (authorization boundary, not just business logic).
-
-## 8. Audit Log
-
-- [ ] Audit entries are created for: login, admin actions, target/capability changes, agent
-      changes, reservation create/release/force-release, session open/close, provider operations.
-- [ ] Only admin can read the audit log.
-- [ ] Secrets/tokens/passwords never appear in audit entries or logs.
-
-## 9. Health / Metrics
-
-- [ ] `/health` (liveness) works even if DB/agents are down.
-- [ ] `/health/ready` (readiness) correctly fails if DB is unreachable or migrations aren't
-      applied.
-- [ ] Metrics endpoint returns sane, bounded output (no unbounded label explosion).
-
-## 10. Frontend (React) — functionality parity + UX
-
-- [ ] Login/logout, token expiry → redirect to login (not a silent broken state).
-- [ ] Target list/detail page renders real data (not mock).
-- [ ] Admin: target/capability CRUD UI (verify what actually works vs. is a stub — some views
-      previously flagged as read-only-only).
-- [ ] Agent admin UI: enroll, list, enable/disable/revoke, resource visibility, online/offline
-      indicator.
-- [ ] Capability-to-resource mapping UI (previously flagged as not implemented — confirm).
-- [ ] Reservation UI: create, list "my reservations," release, conflict error shown clearly.
-- [ ] Session UI: open, see status/expiry, close.
-- [ ] Operations console: execute a provider operation from the UI and see the result (previously
-      flagged as not implemented — confirm).
-- [ ] Audit/activity view: queries the real backend, not localStorage (previously flagged as still
-      mock).
-- [ ] Error states across the UI: 401, 403, 409 (conflict), agent-offline, resource-unavailable —
-      each shows a clear, distinct message, not a generic crash/blank screen.
-- [ ] Non-admin user never sees admin-only controls in the UI (not just blocked server-side —
-      should be visually absent/disabled).
-- [ ] General design pass: responsiveness, consistent components (tables/forms/dialogs),
-      accessibility of controls.
-
-## 11. Deployment / Ops
-
-- [ ] `docker compose up` from a clean checkout — setup is actually reproducible.
-- [ ] Restart containers — data persists (volumes) and DB is not wiped.
-- [ ] Migrations run automatically and idempotently on startup.
+Suggested order: A (server) → B (users) → C (DD) → D (Pi agent) → E (Windows agent) → F (daily use) → G (ops).
+CLI/SDK and VS Code (section H) come after the server and agents are verified.
 
 ---
 
-## Notes / Findings Log
+## A. Server installation
 
-Use this section to log issues found during verification (area, description, severity, status).
+- [ ] Linux: `scripts/install.sh` on a clean host → healthy stack, URL and bootstrap token printed.
+- [ ] Windows: `scripts\install.ps1` with Docker Desktop → healthy stack; `.env` readable only by you
+      (`icacls .env`).
+- [ ] Optional: `--image ghcr.io/…/targethub:0.2.0` after the first release workflow run (amd64 and arm64).
+- [ ] First admin created with the bootstrap token; token rejected afterwards.
+- [ ] `docker compose restart` and a host reboot → data survives, users stay signed in or can sign in again.
+- [ ] Optional: `--domain` with a public DNS name → valid certificate, http redirects to https,
+      `/metrics` returns 404 publicly.
+- [ ] Upgrade from your 0.1.0 install following [upgrade notes](operations/upgrade.md#010--020-upgrade-notes)
+      (volume copy) → old users, targets and history present.
+
+## B. Accounts and roles
+
+- [ ] Create one user of each role (admin, user, viewer). Viewer sees targets/calendar but no reserve buttons;
+      direct API calls as viewer to reserve return 403.
+- [ ] User cannot open admin pages or call admin APIs (403), cannot see `provider_config`/agent IDs.
+- [ ] Wrong password 5× → "Too many failed attempts"; works again after the window.
+- [ ] Disable a signed-in user → their next request fails within seconds; re-enable works.
+- [ ] Reset password from Admin → Users; `scripts/reset_admin_user.sh reset <admin>` on the server console.
+- [ ] Account → create API token; `curl -H "Authorization: Bearer thp_…" <url>/api/v1/auth/me` works; revoke → 401.
+- [ ] Leave a tab open > 15 min, then act → it keeps working (silent refresh); "Sign out everywhere" logs
+      out a second browser.
+
+## C. DD power system (real hardware)
+
+Prerequisite: `TARGETHUB_DD_API_KEY` in `.env`, `docker compose up -d`.
+
+- [ ] Server container reaches DD: Admin → Targets → add **Power / DD power system (server)** with your hub
+      MAC, node, endpoint → save accepted.
+- [ ] Reserve → open power session → **Status** matches the DD dashboard (state, endpoint name, node connected).
+- [ ] **Power on** / **Power off** → relay switches; result says *confirmed*; the time to confirm is acceptable
+      (adjust *Confirm timeout* if needed).
+- [ ] **Power cycle** and **Reset** → OFF, pause (cycle off-time), ON; board reboots.
+- [ ] Wrong API key → "DD API key is missing or was rejected" (no stack trace, key never shown anywhere).
+- [ ] Wrong node/endpoint → 404 message; wrong MAC → 400/404 message.
+- [ ] Emergency lock active on DD → "emergency lock" message; nothing switches.
+- [ ] Node disconnected → "accepted; device has not confirmed yet" (not a false success).
+- [ ] Two targets on different endpoints of the same node do not affect each other.
+- [ ] A target with only DD power (no agent anywhere) works end to end: the power-and-reservations setup.
+- [ ] Record any field-name or status-code differences from the API reference in the findings table.
+
+## D. Raspberry Pi agent (Linux)
+
+- [ ] Admin → Agents → enrollment → Linux command on the Pi → agent online within ~15 s; platform and version shown.
+- [ ] USB-serial adapter appears under resources (by-id path). Map it to a target's serial capability.
+- [ ] Console: boot log visible, typing works, special keys (Ctrl+C, arrows) reach the board, paste works.
+- [ ] Leave the console, let the board print, come back → buffered output appears.
+- [ ] Download transcript → contains input and output.
+- [ ] Relay HAT via `gpiod` config → on/off/cycle switch the relay; `active_low` correct.
+- [ ] Deploy with your real flashing tool (`st-flash`, `openocd`, `esptool`, …) → board runs the new firmware;
+      wrong SHA-256 → refused before flashing.
+- [ ] Unplug the adapter during a session → clear error; replug → reopen works.
+- [ ] Reboot the Pi → agent returns online; stop it (`systemctl stop`) → offline within ~45 s and an
+      `agent.offline` webhook/notification arrives; start → `agent.online`.
+- [ ] Session/reservation end → serial port is released on the Pi (another tool can open it).
+
+## E. Windows agent
+
+- [ ] Python 3.10+ installed for all users; elevated PowerShell → Windows enrollment command → scheduled task
+      "TargetHub Agent …" running as SYSTEM; log file written.
+- [ ] COM ports listed as resources; console works with a real USB-serial board (baud rate correct).
+- [ ] Deploy with a Windows flashing tool (full path to the `.exe` in the agent config).
+- [ ] Reboot Windows → agent starts without anyone logging in.
+- [ ] Config file ACL: a normal user cannot read `C:\ProgramData\TargetHub\agent\*.json`.
+
+## F. Daily use
+
+- [ ] Reserve now and reserve later (start time); overlapping reservation by a second user is refused.
+- [ ] Two users click **Reserve** on the same free board at the same moment → exactly one wins.
+- [ ] Busy board → **Join waitlist** as user 2 → user 1 releases → user 2 gets the reservation and a notification.
+- [ ] **Reserve any** with a tag picks a free board; with all busy, waitlist by tag works.
+- [ ] Extend within policy; extend beyond max duration refused; with someone waiting, extend refused
+      (unless the policy allows it).
+- [ ] "Ending soon" notification arrives; at the end time the session closes and the board frees up.
+- [ ] Policy changes (max duration, per-user limit) take effect immediately.
+- [ ] Maintenance mode with a reason → users see it, cannot reserve; back to available.
+- [ ] Admin force release → owner notified, waitlist advances, audited.
+- [ ] Slack and/or Teams webhook: **Send test**, then real events arrive with a working link; generic webhook
+      signature verifies with your secret.
+- [ ] Calendar shows everyone's bookings in local time.
+- [ ] Mobile/tablet browser: targets, reservations and console usable.
+
+## G. Operations
+
+- [ ] `scripts/backup.sh backups/` → restore into a staging copy with `scripts/restore.sh --yes …` → data intact.
+- [ ] `/metrics` with `METRICS_TOKEN` scraped by your Prometheus.
+- [ ] `docker compose logs api` shows request IDs; no passwords, tokens or DD keys in logs.
+- [ ] Audit log shows sign-ins, admin changes, reservations and power operations with the right users.
+- [ ] Load sanity: 10+ users browsing and 3+ consoles open at once stay responsive.
+
+## H. Later: CLI/SDK and VS Code extension
+
+Deferred until A to G pass.
+
+- [ ] CLI: `targethub login`, `reserve --tag … --wait`, `open`, `power`, `serial --expect`, `console`, `log`, `release`.
+- [ ] CI example from [CLI, SDK and CI](automation/ci-hil.md) on a self-hosted runner.
+- [ ] VS Code extension (`npm run package` → install the .vsix): sign in with an API token, reserve, open console, release.
+
+---
+
+## Findings log
 
 | Date | Area | Finding | Severity | Status |
 |------|------|---------|----------|--------|

@@ -1,6 +1,60 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 — 2026-10-27
+
+Server, agents and web UI ready for team deployment. DD power, Raspberry Pi/Windows agents and real
+boards have been verified with simulators only; see docs/MANUAL_VERIFICATION_CHECKLIST.md.
+
+### Upgrade notes
+- The PostgreSQL volume changed from `targethub_postgres_data` to `<project>_pgdata`: copy it before the
+  first start (docs/operations/upgrade.md). Redis and MinIO are no longer used.
+- Everyone signs in again once (refresh-token sessions). CI should use personal API tokens.
+- Simulated providers are disabled outside development; capabilities without a real backend are refused.
+  Demo servers: `ALLOW_SIMULATED_PROVIDERS=true`.
+- `/metrics` requires `METRICS_TOKEN` or an admin token. The legacy dashboard is removed.
+- Upgrade agents to 0.2.0.
+
+### Lab features
+- Live availability for all users, tags, maintenance/retired status with a reason, lab calendar.
+- Reservation policy (max duration, advance booking, per-user limit, warnings, retention), extend,
+  reserve-any-by-tag, waitlist with automatic assignment, admin force release.
+- In-app notifications and Slack / Teams / HMAC-signed generic webhooks (reservation, waitlist, target and
+  agent events; `agent.offline` is sent once, `agent.online` on return).
+- Background scheduler: expiry, ending-soon warnings, waitlist, agent liveness, retention, gauges.
+
+### Sessions, serial and power
+- WebSocket serial console (xterm.js) with buffered agent reads, reconnect and downloadable transcripts.
+- Asynchronous operations (`wait=false`, 202 + polling) for long deploys.
+- DD Endpoint Control API driver on the server, with confirmation polling and power-cycle reset; HTTP power controllers;
+  secrets referenced by environment variable only.
+
+### Accounts and security
+- Roles admin / user / viewer; disable users; 15-minute access tokens with rotating refresh tokens and reuse
+  detection; sign out everywhere; personal API tokens; PBKDF2 600k with transparent rehash.
+- `python -m app.manage` / `scripts/reset_admin_user.sh` for console recovery.
+
+### Agents
+- Agent 0.2.0 for Linux, Raspberry Pi and Windows (pyserial, Scheduled Task installer with checksum
+  verification and ACL-protected config); concurrent operations with per-resource locks; serial background
+  reader, session takeover, idle reaper and path allowlist; DD fallback; built-in `sim://` board.
+
+### Web UI
+- Redesigned targets page, reservations, sessions and session workspace, calendar, account page,
+  notification bell; admin targets (capability editor for agent/DD/HTTP backends), users, agents
+  (Linux/Windows install commands), settings (policy, webhooks), overview and activity log.
+
+### Operations
+- `scripts/install.ps1` for Windows servers; `install.sh --image`; fixed an `install.sh` abort when `.env`
+  lacked a key.
+- CI: lint, backend on SQLite and PostgreSQL migrations, live agent E2E, frontend, Playwright, Windows agent
+  tests, Docker build-and-boot. Release workflow publishes a multi-arch image (amd64/arm64) and release assets.
+- Simulators: DD mock server, pty virtual board, demo lab and its verifier.
+- Documentation rewritten: install, user, admin, agents, DD power, upgrade, troubleshooting, security, architecture.
+
+### Clients (preview, verification deferred)
+- Python SDK/CLI and VS Code extension updated for API tokens, waitlist, extend and the long-poll console.
+
+## Unreleased (pre-0.2.0)
 
 ### Security
 - Login, password change and admin bootstrap are rate limited after repeated failures (`AUTH_MAX_FAILURES`, `AUTH_FAILURE_WINDOW_SECONDS`); responses are 429 with `Retry-After`.

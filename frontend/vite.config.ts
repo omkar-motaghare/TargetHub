@@ -8,7 +8,12 @@ export default defineConfig({
   plugins: [react()],
   define: { 'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version) },
   server: {
-    port: 5173
+    port: 5173,
+    // `npm run dev` talks to a backend on :8000 (override with TARGETHUB_DEV_API).
+    proxy: {
+      '/api': { target: process.env.TARGETHUB_DEV_API || 'http://localhost:8000', changeOrigin: true, ws: true },
+      '/web': { target: process.env.TARGETHUB_DEV_API || 'http://localhost:8000', changeOrigin: true },
+    },
   },
   test: {
     environment: 'jsdom',
