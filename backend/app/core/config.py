@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     """
 
     app_name: str = "TargetHub"
-    app_version: str = "0.1.0"
+    app_version: str = "0.2.0"
     environment: str = "production"
 
     host: str = "0.0.0.0"

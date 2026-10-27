@@ -26,15 +26,21 @@ services:
           memory: 512M
 
   api:
+    image: ${TARGETHUB_IMAGE:-targethub:local}
     build:
       context: .
       dockerfile: backend/Dockerfile
       args:
-        APP_VERSION: ${TARGETHUB_VERSION:-0.1.0}
+        APP_VERSION: ${TARGETHUB_VERSION:-0.2.0}
     restart: unless-stopped
+    # Everything in .env reaches the server (e.g. TARGETHUB_DD_API_KEY or any other
+    # variable a capability's api_key_env names). The keys below are always set.
+    env_file:
+      - path: .env
+        required: false
     environment:
       APP_NAME: TargetHub
-      APP_VERSION: ${TARGETHUB_VERSION:-0.1.0}
+      APP_VERSION: ${TARGETHUB_VERSION:-0.2.0}
       ENVIRONMENT: ${ENVIRONMENT:-production}
       HOST: 0.0.0.0
       PORT: 8000

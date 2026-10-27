@@ -1,4 +1,4 @@
-FROM node:20-alpine AS frontend-builder
+FROM node:22-alpine AS frontend-builder
 
 WORKDIR /workspace/frontend
 
@@ -11,7 +11,12 @@ RUN npm run build
 
 FROM python:3.12-slim
 
-ARG APP_VERSION=0.1.0
+LABEL org.opencontainers.image.title="TargetHub" \
+      org.opencontainers.image.description="Embedded lab orchestration: reservations, serial consoles, power and deploy" \
+      org.opencontainers.image.source="https://github.com/omkar-motaghare/TargetHub" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
+ARG APP_VERSION=0.2.0
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
