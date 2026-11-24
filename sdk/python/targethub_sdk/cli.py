@@ -111,6 +111,14 @@ def build_parser() -> argparse.ArgumentParser:
     artifact_delete = artifact_sub.add_parser("delete", help="delete an artifact you uploaded")
     artifact_delete.add_argument("artifact_id")
 
+    report = sub.add_parser("report", help="usage report: utilisation, idle reservations, waitlist (admin)")
+    report.add_argument("--days", type=int, default=30, help="period ending now (default 30)")
+    report.add_argument(
+        "--csv",
+        choices=["targets", "tags", "users", "idle", "waitlist"],
+        help="print this table as CSV instead of the JSON summary",
+    )
+
     token = sub.add_parser("token", help="manage personal API tokens")
     token_sub = token.add_subparsers(dest="token_command", required=True)
     token_create = token_sub.add_parser("create")
@@ -316,6 +324,11 @@ def dispatch(client: TargetHubClient, args: argparse.Namespace) -> int:
                 artifact_id=artifact_id,
             )
         )
+    elif command == "report":
+        if args.csv:
+            sys.stdout.write(client.usage_report_csv(args.csv, args.days))
+        else:
+            emit(client.usage_report(args.days))
     elif command == "artifact":
         if args.artifact_command == "upload":
             emit(client.upload_artifact(args.path, args.description))

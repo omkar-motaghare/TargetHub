@@ -15,11 +15,9 @@ CI with PostgreSQL, Windows and Docker jobs · multi-arch image release workflow
    network-booted boards can be reached without exposing them.
 3. **Debugger integration**: J-Link / OpenOCD GDB server started by the agent for the session, reachable
    through a session-scoped tunnel; VS Code launch configuration.
-4. **Artifact upload**: upload firmware to the server (or S3-compatible storage) instead of hosting it
-   elsewhere for deploy.
-5. **Board health checks**: scheduled power-on + "expect boot banner" checks that put a failing board into
-   maintenance automatically.
-6. **Usage reports**: utilisation per target/tag/team, idle reservations, waitlist times (CSV and charts).
+4. ~~**Artifact upload**~~ *(done, unreleased: local disk storage; S3-compatible storage and a web UI page still to do)*
+5. ~~**Board health checks**~~ *(done, unreleased: API and scheduler; a web UI page still to do)*
+6. ~~**Usage reports**~~ *(done, unreleased: JSON/CSV by target, tag, user; per-team and charts still to do)*
 7. **Teams / projects**: group users and restrict targets per team; per-team policies.
 8. **SSO**: OIDC (Azure AD/Entra ID, Google, Keycloak) and LDAP, alongside local accounts.
 9. **Recording console sessions for replay** and searchable transcripts.

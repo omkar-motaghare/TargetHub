@@ -128,6 +128,29 @@ The target needs one enabled **serial** and one enabled **power** capability. Ho
 `targethub_health_checks_total{status}` is exported on `/metrics`. A check that cycles power is disruptive,
 so choose the interval and quiet hours accordingly.
 
+## Usage reports
+
+**Reports** (admin only) show how the lab is used, to decide what to buy, retire or fix:
+
+- **Utilisation** per target and per tag: booked hours and the percentage of the period each board was held.
+  Reservations count for the time they actually held the board (until release or expiry; a running one counts
+  until now) and are clipped to the period.
+- **Idle reservations**: reservations that held a board without anyone opening a session on it, with the hours
+  held, per target, per user and as a share of all booked time.
+- **Per-user** booked and idle hours.
+- **Waitlist**: how many entries were fulfilled, expired or cancelled, and the average and longest wait.
+
+Automated health checks (`healthcheck` user) are not counted as usage.
+
+```bash
+targethub report --days 30                  # JSON summary
+targethub report --days 30 --csv targets    # also: tags, users, idle, waitlist
+```
+
+The API is `GET /api/v1/reports/usage?from=<iso>&to=<iso>` (default: the last 30 days, at most 366 days) and
+`GET /api/v1/reports/usage.csv?kind=targets|tags|users|idle|waitlist`. CSV cells that start with `=`, `+`, `-` or
+`@` are prefixed with `'` so that spreadsheets do not run user-supplied text as formulas.
+
 ## Firmware artifacts
 
 Users with the *user* or *admin* role can upload firmware images (`POST /api/v1/artifacts`, or

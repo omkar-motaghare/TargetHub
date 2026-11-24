@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Firmware artifacts**: upload a firmware image once (`POST /api/v1/artifacts`, `targethub artifact upload`,
+  `targethub deploy --file`) and deploy it by id. Agents download through HMAC-signed, expiring links and verify
+  the stored SHA-256. New settings `ARTIFACT_DIR`, `ARTIFACT_MAX_BYTES`, `ARTIFACT_URL_TTL_SECONDS`; the Docker
+  stack mounts an `artifacts` volume.
+- **Board health checks**: per-target scheduled power-and-expect-banner checks run as the `healthcheck` user.
+  Boards that keep failing go into maintenance and return to service when a later check passes; failures appear
+  in Admin → Overview. API under `/api/v1/targets/<id>/health-check`.
+- **Usage reports** (admin): utilisation per target and tag, idle reservations, per-user hours and waitlist
+  times as JSON or CSV; `targethub report`.
+- README rewrite and `scripts/setup.sh`, a one-command setup for Linux and macOS.
+
+### Upgrade notes
+- Two migrations run automatically (`artifacts`, health checks). Back up before upgrading. Uploaded artifacts
+  are stored in the `artifacts` volume, which `scripts/backup.sh` does not include.
+
 ## v0.2.0 — 2026-10-27
 
 Server, agents and web UI ready for team deployment. DD power, Raspberry Pi/Windows agents and real

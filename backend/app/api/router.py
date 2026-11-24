@@ -8,6 +8,7 @@ from app.api.v1.health_checks import router as health_checks_router
 from app.api.v1.lab import router as lab_router
 from app.api.v1.labs import router as labs_router
 from app.api.v1.providers import router as providers_router
+from app.api.v1.reports import router as reports_router
 from app.api.v1.reservations import router as reservations_router
 from app.api.v1.serial_ws import router as serial_ws_router
 from app.api.v1.sessions import router as sessions_router
@@ -31,3 +32,4 @@ api_router.include_router(lab_router)
 api_router.include_router(system_router)
 api_router.include_router(artifacts_router)
 api_router.include_router(health_checks_router)
+api_router.include_router(reports_router)

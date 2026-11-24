@@ -179,3 +179,17 @@ def test_upload_artifact_sends_multipart_and_deploy_by_artifact_id(tmp_path):
 
     with _pytest.raises(ValueError):
         client.deploy("s1")
+
+
+def test_usage_report_requests_the_period_ending_now():
+    client, recorder = make_client(
+        {
+            ("GET", "/api/v1/reports/usage"): {"totals": {}},
+            ("GET", "/api/v1/reports/usage.csv"): lambda _r: httpx.Response(200, text="name\nB1\n"),
+        }
+    )
+    assert client.usage_report(days=7) == {"totals": {}}
+    params = recorder.requests[0].url.params
+    assert "from" in params and "to" in params
+    assert client.usage_report_csv("idle", days=7) == "name\nB1\n"
+    assert recorder.requests[1].url.params["kind"] == "idle"

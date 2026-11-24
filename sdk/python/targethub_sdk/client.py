@@ -359,6 +359,24 @@ class TargetHubClient:
     def delete_artifact(self, artifact_id: str) -> None:
         self._request("DELETE", f"/artifacts/{artifact_id}")
 
+    # ------------------------------------------------------------------ reports (admin)
+
+    def usage_report(self, days: int = 30) -> dict[str, Any]:
+        """Utilisation per target and tag, idle reservations, per-user hours and waitlist times."""
+        end = datetime.now(UTC)
+        return self._request(
+            "GET", "/reports/usage", params={"from": _iso(end - timedelta(days=days)), "to": _iso(end)}
+        )
+
+    def usage_report_csv(self, kind: str = "targets", days: int = 30) -> str:
+        end = datetime.now(UTC)
+        return self._request(
+            "GET",
+            "/reports/usage.csv",
+            params={"kind": kind, "from": _iso(end - timedelta(days=days)), "to": _iso(end)},
+            raw=True,
+        )
+
     # ------------------------------------------------------------------ notifications
 
     def notifications(self, unread: bool = False) -> list[dict[str, Any]]:
