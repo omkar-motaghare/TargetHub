@@ -74,7 +74,10 @@ assuming the board is off.
 
 ### Deploy firmware
 
-Give an artifact URL (HTTPS) and its SHA-256. The agent downloads it, verifies the checksum and runs the
+You can deploy in two ways. **Upload the firmware to TargetHub** (recommended): choose the file, TargetHub stores
+it and computes its SHA-256, and the agent downloads it through a short-lived signed link. From the command line:
+`targethub artifact upload fw.bin`, then `targethub deploy <session-id> --artifact-id <id>`, or in one step
+`targethub deploy <session-id> --file fw.bin`. Or **give an artifact URL** (HTTPS) and its SHA-256. The agent downloads it, verifies the checksum and runs the
 flashing command the administrator configured for that board. The output of the flashing tool is shown
 when it finishes. Long deployments run in the background; the page polls until they are done.
 

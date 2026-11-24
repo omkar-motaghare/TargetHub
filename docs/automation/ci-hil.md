@@ -37,6 +37,9 @@ targethub serial <session-id> [--send TEXT] [--expect TEXT] [--wait SECONDS]
 targethub console <session-id>                     # interactive, Ctrl+] to quit
 targethub log <session-id> [--include-input]        # transcript
 targethub deploy <session-id> <url> <sha256> [--no-wait] [--timeout S]
+targethub deploy <session-id> --file build/fw.bin        # upload to TargetHub, then deploy
+targethub deploy <session-id> --artifact-id <id>         # deploy an already uploaded image
+targethub artifact upload|list|delete ...
 targethub close <session-id>
 targethub token create NAME [--expires-days N] | token list | token revoke ID
 ```
@@ -57,9 +60,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: pip install "targethub-sdk @ git+https://github.com/omkar-motaghare/TargetHub#subdirectory=sdk/python"
       - name: Build firmware
-        run: make firmware.bin && sha256sum firmware.bin | cut -d' ' -f1 > firmware.sha256
-      - name: Publish artifact where the agent can download it
-        run: ./scripts/upload-artifact.sh firmware.bin   # any HTTPS location the agent can reach
+        run: make firmware.bin
       - name: Hardware test
         run: |
           set -euo pipefail
@@ -68,7 +69,7 @@ jobs:
           power=$(targethub open "$res" power | jq -r .id)
           deploy=$(targethub open "$res" deploy | jq -r .id)
           serial=$(targethub open "$res" serial | jq -r .id)
-          targethub deploy "$deploy" "$ARTIFACT_URL" "$(cat firmware.sha256)"
+          targethub deploy "$deploy" --file firmware.bin   # uploads to TargetHub, agent verifies the SHA-256
           targethub power "$power" cycle
           targethub serial "$serial" --expect "Self-test PASSED" --wait 60
           targethub log "$serial" > serial.log
@@ -110,7 +111,7 @@ def test_boots_after_power_cycle(board):
 Useful SDK calls: `list_targets(tag)`, `reserve(target, minutes)`, `reserve_any(tag, minutes)`,
 `wait_for_reservation(...)`, `extend_reservation(id, minutes)`, `open_session(reservation_id, type)`,
 `serial_write`, `serial_read(size, wait_ms)`, `serial_expect(pattern, timeout)`, `serial_log`,
-`power(session, op)`, `deploy(session, url, sha256)`, `submit()`/`wait_operation()` for async
+`power(session, op)`, `deploy(session, url, sha256)` or `deploy(session, artifact_id=...)`, `upload_artifact(path)`, `submit()`/`wait_operation()` for async
 operations, `notifications()`. Errors raise `TargetHubError(status_code, detail)`.
 
 ## Tips

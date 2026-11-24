@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.agents import router as agents_router
+from app.api.v1.artifacts import router as artifacts_router
 from app.api.v1.audit import router as audit_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.lab import router as lab_router
@@ -27,3 +28,4 @@ api_router.include_router(audit_router)
 api_router.include_router(labs_router)
 api_router.include_router(lab_router)
 api_router.include_router(system_router)
+api_router.include_router(artifacts_router)

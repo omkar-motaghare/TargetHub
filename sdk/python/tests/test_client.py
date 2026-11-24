@@ -148,3 +148,34 @@ def test_network_failure_is_reported_with_status_zero():
     with pytest.raises(TargetHubError) as caught:
         client.list_targets()
     assert caught.value.status_code == 0
+
+
+def test_upload_artifact_sends_multipart_and_deploy_by_artifact_id(tmp_path):
+    import json
+
+    firmware = tmp_path / "fw.bin"
+    firmware.write_bytes(b"image")
+    client, recorder = make_client(
+        {
+            ("POST", "/api/v1/artifacts"): {"id": "a1", "sha256": "b" * 64},
+            ("GET", "/api/v1/artifacts"): [{"id": "a1"}],
+            ("DELETE", "/api/v1/artifacts/a1"): lambda _r: httpx.Response(204),
+            ("POST", "/api/v1/sessions/s1/execute"): {"message": "ok", "data": {}},
+        }
+    )
+    assert client.upload_artifact(str(firmware), "rc1")["id"] == "a1"
+    upload = recorder.requests[0]
+    assert upload.headers["content-type"].startswith("multipart/form-data")
+    assert b'filename="fw.bin"' in upload.content and b"image" in upload.content and b"rc1" in upload.content
+
+    assert client.list_artifacts(mine=True) == [{"id": "a1"}]
+    assert recorder.requests[1].url.params["mine"] == "true"
+    client.delete_artifact("a1")
+
+    client.deploy("s1", artifact_id="a1", wait=False)
+    assert json.loads(recorder.requests[3].content)["params"] == {"artifact_id": "a1"}
+
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError):
+        client.deploy("s1")

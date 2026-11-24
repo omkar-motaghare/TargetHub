@@ -54,6 +54,11 @@ class Settings(BaseSettings):
             return self.allow_simulated_providers
         return self.environment.lower() in DEV_ENVIRONMENTS
 
+    # Uploaded firmware artifacts: stored on local disk, handed to agents through short-lived signed links.
+    artifact_dir: str = "artifacts"
+    artifact_max_bytes: int = 512 * 1024 * 1024
+    artifact_url_ttl_seconds: int = 900
+
     # Background lab maintenance (expiry, warnings, waitlist, retention).
     scheduler_enabled: bool = True
     scheduler_interval_seconds: int = 30

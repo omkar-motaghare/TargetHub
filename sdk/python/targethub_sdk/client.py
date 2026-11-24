@@ -6,6 +6,7 @@ and CI) or with :meth:`TargetHubClient.login` for interactive use.
 
 from __future__ import annotations
 
+import os
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -319,11 +320,44 @@ class TargetHubClient:
     def power(self, session_id: str, operation: str) -> dict[str, Any]:
         return self.execute(session_id, operation)
 
-    def deploy(self, session_id: str, url: str, sha256: str, wait: bool = True, timeout: float = 900) -> dict[str, Any]:
-        queued = self.submit(session_id, "deploy", url=url, sha256=sha256)
+    def deploy(
+        self,
+        session_id: str,
+        url: str | None = None,
+        sha256: str | None = None,
+        wait: bool = True,
+        timeout: float = 900,
+        *,
+        artifact_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Deploy by ``url`` + ``sha256``, or by the id of an artifact uploaded with ``upload_artifact``."""
+        if artifact_id:
+            queued = self.submit(session_id, "deploy", artifact_id=artifact_id)
+        elif url and sha256:
+            queued = self.submit(session_id, "deploy", url=url, sha256=sha256)
+        else:
+            raise ValueError("deploy needs either artifact_id or both url and sha256")
         if not wait or not queued.get("operation_id"):
             return queued
         return self.wait_operation(session_id, queued["operation_id"], timeout=timeout)
+
+    # ------------------------------------------------------------------ artifacts
+
+    def upload_artifact(self, path: str, description: str | None = None) -> dict[str, Any]:
+        """Upload a firmware file to the server; returns its id and SHA-256."""
+        with open(path, "rb") as handle:
+            return self._request(
+                "POST",
+                "/artifacts",
+                files={"file": (os.path.basename(path), handle, "application/octet-stream")},
+                data={"description": description} if description else None,
+            )
+
+    def list_artifacts(self, mine: bool = False) -> list[dict[str, Any]]:
+        return self._request("GET", "/artifacts", params={"mine": "true"} if mine else None)
+
+    def delete_artifact(self, artifact_id: str) -> None:
+        self._request("DELETE", f"/artifacts/{artifact_id}")
 
     # ------------------------------------------------------------------ notifications
 

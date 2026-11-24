@@ -51,6 +51,9 @@ services:
       TARGETHUB_PUBLIC_URL: ${TARGETHUB_PUBLIC_URL:-http://localhost:8000}
       ADMIN_BOOTSTRAP_TOKEN: ${ADMIN_BOOTSTRAP_TOKEN:-}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
+      ARTIFACT_DIR: /data/artifacts
+    volumes:
+      - artifacts:/data/artifacts
     ports:
       - "${TARGETHUB_BIND:-127.0.0.1}:${TARGETHUB_PORT:-8000}:8000"
     depends_on:
@@ -73,3 +76,4 @@ services:
 
 volumes:
   pgdata:
+  artifacts:

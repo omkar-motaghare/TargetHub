@@ -99,6 +99,25 @@ platform, agent version and discovered resources.
   host is lost or compromised). A disabled or revoked agent name can be re-enrolled.
 - Offline and back-online transitions are announced to webhooks (`agent.offline`, `agent.online`).
 
+## Firmware artifacts
+
+Users with the *user* or *admin* role can upload firmware images (`POST /api/v1/artifacts`, or
+`targethub artifact upload`). TargetHub stores each file on the server's disk, records its SHA-256, and
+deploys it by id: the agent receives a signed link that expires after 15 minutes and verifies the checksum
+before flashing. Only the uploader or an admin can delete an artifact.
+
+| Setting (`.env`) | Default | Meaning |
+| --- | --- | --- |
+| `ARTIFACT_DIR` | `artifacts` (`/data/artifacts` in Docker) | Where uploaded files are stored. The Docker stack mounts a named volume `artifacts` here. |
+| `ARTIFACT_MAX_BYTES` | 536870912 (512 MiB) | Largest accepted upload. |
+| `ARTIFACT_URL_TTL_SECONDS` | 900 | Lifetime of the signed download link given to an agent. |
+
+`TARGETHUB_PUBLIC_URL` must be an address the **agents** can reach, because the signed link is built from it;
+agents also require HTTPS unless configured with `allow_insecure_http`. `scripts/backup.sh` backs up the
+database only: the artifact files are in the `artifacts` volume, so back that up separately if you need the
+uploaded images. A database restored without the volume keeps the artifact records, but deploying one reports
+that its file is missing and it must be uploaded again.
+
 ## Reservation policy
 
 **Admin → Settings → Reservation policy** (users can read it; only admins change it):

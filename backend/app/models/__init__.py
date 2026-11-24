@@ -1,5 +1,6 @@
 from app.models.agent import Agent, AgentEnrollment, AgentResource
 from app.models.agent_operation import AgentOperation
+from app.models.artifact import Artifact
 from app.models.audit import AuditLog
 from app.models.base import Base
 from app.models.lab import AppSetting, Notification, WaitlistEntry
@@ -15,6 +16,7 @@ __all__ = [
     "AgentOperation",
     "AgentResource",
     "AppSetting",
+    "Artifact",
     "AuditLog",
     "Base",
     "Notification",

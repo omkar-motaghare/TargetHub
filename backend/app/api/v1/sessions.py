@@ -21,6 +21,7 @@ from app.repositories.session_repository import SessionRepository
 from app.repositories.target_repository import TargetRepository
 from app.schemas.session import SessionCreate, SessionPublicResponse, SessionResponse
 from app.services.agent_operation_service import AgentOperationService
+from app.services.artifact_service import ArtifactService
 from app.services.audit_service import AuditService
 from app.services.provider_gateway import ProviderGateway
 from app.services.session_service import SessionService
@@ -184,6 +185,7 @@ async def session_execute(
     session_id: str,
     request: ExecuteRequest,
     gateway: Gateway,
+    db: Annotated[Session, Depends(get_db)],
     response: Response,
     wait: bool = Query(
         default=True,
@@ -191,8 +193,12 @@ async def session_execute(
     ),
     user=Depends(get_current_user),
 ):
+    params = request.params
+    if request.operation.strip().lower() == "deploy" and params.get("artifact_id"):
+        # Uploaded artifact: expand to a signed URL + checksum so every deploy path can use it.
+        params = ArtifactService(db).resolve_deploy_params(params)
     result = await gateway.execute_async(
-        session_id, user.username, request.operation, request.params, detached=not wait
+        session_id, user.username, request.operation, params, detached=not wait
     )
     if result.get("status") == "pending":
         response.status_code = 202

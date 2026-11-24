@@ -89,12 +89,27 @@ def build_parser() -> argparse.ArgumentParser:
     log.add_argument("session_id")
     log.add_argument("--include-input", action="store_true")
 
-    deploy = sub.add_parser("deploy", help="deploy a checksummed artifact through the Agent")
+    deploy = sub.add_parser(
+        "deploy",
+        help="deploy firmware: URL + SHA-256, an uploaded artifact (--artifact-id) or a local file (--file)",
+    )
     deploy.add_argument("session_id")
-    deploy.add_argument("url")
-    deploy.add_argument("sha256")
+    deploy.add_argument("url", nargs="?")
+    deploy.add_argument("sha256", nargs="?")
+    deploy.add_argument("--artifact-id", help="id of an artifact uploaded to the server")
+    deploy.add_argument("--file", help="upload this local file first, then deploy it")
     deploy.add_argument("--no-wait", action="store_true", help="return immediately with the operation id")
     deploy.add_argument("--timeout", type=float, default=900)
+
+    artifact = sub.add_parser("artifact", help="firmware artifacts stored on the server")
+    artifact_sub = artifact.add_subparsers(dest="artifact_command", required=True)
+    artifact_upload = artifact_sub.add_parser("upload", help="upload a firmware file")
+    artifact_upload.add_argument("path")
+    artifact_upload.add_argument("--description")
+    artifact_list = artifact_sub.add_parser("list", help="list uploaded artifacts")
+    artifact_list.add_argument("--mine", action="store_true")
+    artifact_delete = artifact_sub.add_parser("delete", help="delete an artifact you uploaded")
+    artifact_delete.add_argument("artifact_id")
 
     token = sub.add_parser("token", help="manage personal API tokens")
     token_sub = token.add_subparsers(dest="token_command", required=True)
@@ -285,7 +300,30 @@ def dispatch(client: TargetHubClient, args: argparse.Namespace) -> int:
     elif command == "log":
         sys.stdout.write(client.serial_log(args.session_id, args.include_input))
     elif command == "deploy":
-        emit(client.deploy(args.session_id, args.url, args.sha256, wait=not args.no_wait, timeout=args.timeout))
+        artifact_id = args.artifact_id
+        if args.file:
+            artifact_id = client.upload_artifact(args.file)["id"]
+        if not artifact_id and not (args.url and args.sha256):
+            print("deploy needs --file, --artifact-id, or both URL and SHA-256", file=sys.stderr)
+            return 2
+        emit(
+            client.deploy(
+                args.session_id,
+                args.url,
+                args.sha256,
+                wait=not args.no_wait,
+                timeout=args.timeout,
+                artifact_id=artifact_id,
+            )
+        )
+    elif command == "artifact":
+        if args.artifact_command == "upload":
+            emit(client.upload_artifact(args.path, args.description))
+        elif args.artifact_command == "list":
+            emit(client.list_artifacts(mine=args.mine))
+        else:
+            client.delete_artifact(args.artifact_id)
+            emit({"deleted": args.artifact_id})
     elif command == "token":
         if args.token_command == "create":
             emit(client.create_api_token(args.name, args.expires_days))

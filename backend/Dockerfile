@@ -34,7 +34,7 @@ COPY backend/ /app
 COPY --from=frontend-builder /workspace/frontend/dist /app/app/web/react
 
 RUN useradd --system --uid 10001 --home-dir /app --shell /usr/sbin/nologin targethub \
-    && mkdir -p /data /app/app/logs \
+    && mkdir -p /data/artifacts /app/app/logs \
     && chown -R targethub:targethub /data /app/app/logs
 
 USER targethub
