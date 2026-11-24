@@ -219,3 +219,22 @@ def test_failing_checks_show_up_in_the_admin_overview(tmp_path, monkeypatch):
         error = [i for i in client.get("/api/v1/system/overview", headers=auth(admin)).json()["issues"]
                  if "health check" in i["message"]]
         assert len(error) == 1 and error[0]["severity"] == "error" and "maintenance" in error[0]["message"]
+
+
+def test_scheduler_runs_due_checks_and_schedules_the_next_one(tmp_path, monkeypatch):
+    import asyncio
+
+    from app.services.health_check_service import run_due_health_checks
+
+    with api_client(tmp_path, monkeypatch) as (client, session_local):
+        admin, agent_id, credential, target = _lab(client)
+        url = f"/api/v1/targets/{target['id']}/health-check"
+        client.put(url, json={**CONFIG, "interval_minutes": 60}, headers=auth(admin))
+        with FakeAgent(client, agent_id, credential, Board(works=True)):
+            assert asyncio.run(run_due_health_checks(session_local)) == 1
+            assert asyncio.run(run_due_health_checks(session_local)) == 0  # nothing is due any more
+        state = client.get(url, headers=auth(admin)).json()
+        assert state["last_status"] == "passed"
+        next_run = datetime.fromisoformat(state["next_run_at"])
+        assert timedelta(minutes=55) < next_run - datetime.now(UTC) <= timedelta(minutes=60)
+        assert client.get(f"{url}/results", headers=auth(admin)).json()[0]["trigger"] == "schedule"
