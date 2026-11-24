@@ -55,8 +55,10 @@ and firmware deployment, and release it when they are done. Everything works fro
 | **Reservations** | See live availability and a calendar. Reserve now or at a later time, extend, release early, reserve any free board with a given tag, and join a **waitlist** that hands over the board automatically when it frees up. Policy controls maximum duration, advance booking and per-user limits. **Maintenance** mode takes a board out of service with a visible reason. |
 | **Sessions** | Each reservation gives its owner exclusive sessions on the board's capabilities. A **browser serial console** (a real terminal over WebSocket) keeps output while you are away and saves full transcripts you can download. Power and firmware deploy run from the same session. |
 | **Power** | Three backends: the **DD (Doordarshan) REST power system** called from the server (no agent needed), a generic **HTTP power controller** (any PDU or relay with a simple REST API), or relays and GPIO lines on an agent. Power on, off, cycle, reset and status. |
-| **Firmware deploy** | Give an HTTPS artifact URL and its SHA-256. The agent verifies the checksum before running your configured flashing tool (for example `st-flash`, `openocd` or `esptool`). A mismatch is refused before anything is flashed. |
+| **Firmware deploy** | **Upload the image to TargetHub** and deploy it by id, or give an HTTPS artifact URL and its SHA-256. Uploads are stored on the server and handed to the agent through short-lived signed links. The agent verifies the checksum before running your configured flashing tool (for example `st-flash`, `openocd` or `esptool`). A mismatch is refused before anything is flashed. |
 | **Agents** | One small Python file for **Linux, Raspberry Pi and Windows** hosts. Agents connect outward to the server (no inbound ports needed), so they work behind NAT. Serial ports, GPIO lines and flashing commands are declared in the agent's own config, so the server cannot make an agent open arbitrary devices or run arbitrary commands. |
+| **Health checks** | Scheduled power-and-expect-banner checks per board. A board that keeps failing is put into maintenance automatically, and returns to service when a later check passes. |
+| **Usage reports** | Utilisation per board and tag, idle reservations, per-user hours and waitlist times, as JSON or CSV (admin). |
 | **Accounts** | Local accounts with three roles: **admin** (manages everything), **user** (reserves and uses boards) and **viewer** (read-only). Rotating sign-in tokens, personal API tokens for scripts and CI, rate-limited login, and an audit log of every change. |
 | **Notifications** | An in-app bell, plus **Slack**, **Microsoft Teams** and generic webhooks. Generic webhooks are signed with HMAC-SHA256 so the receiver can verify them. |
 | **Automation** | A Python SDK and `targethub` CLI, a VS Code extension, a REST API with interactive docs at `/docs`, and Prometheus metrics at `/metrics`. |
@@ -253,6 +255,8 @@ targethub reserve STM32-01 --minutes 60 --wait
 targethub open <reservation-id> serial
 targethub console <session-id>            # interactive console in your terminal
 targethub release STM32-01
+targethub deploy <session-id> --file build/fw.bin   # upload firmware and deploy it
+targethub report --days 30                          # usage report (admin)
 ```
 
 - **VS Code:** install the TargetHub extension, sign in with an API token, then use the *TargetHub: …* commands
@@ -337,8 +341,8 @@ docs/               Documentation (MkDocs)
 
 ## Roadmap and contributing
 
-Planned after 0.2.0: SSH and Telnet proxying, J-Link debugging, artifact upload, richer health checks and
-single sign-on. See the [roadmap](docs/development/ROADMAP.md).
+Done since 0.2.0 (unreleased): artifact upload, board health checks and usage reports. Planned: SSH and Telnet
+proxying, J-Link debugging, teams and projects, and single sign-on. See the [roadmap](docs/development/ROADMAP.md).
 
 Issues and pull requests are welcome. Run the test suites described in the
 [development guide](docs/developer-guide/local-docker-development.md) before opening a pull request.

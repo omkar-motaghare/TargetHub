@@ -3,12 +3,13 @@
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_db, is_admin_user, require_operator
+from app.core.config import settings
 from app.repositories.audit_repository import AuditRepository
 from app.services.artifact_service import ArtifactError, ArtifactService, ArtifactTooLarge
 from app.services.audit_service import AuditService
@@ -37,11 +38,15 @@ def _owned_or_admin(artifact, user) -> None:
 
 @router.post("", response_model=ArtifactResponse, status_code=201)
 def upload_artifact(
+    request: Request,
     db: DB,
     file: Annotated[UploadFile, File(description="Firmware image")],
     description: Annotated[str | None, Form(max_length=500)] = None,
     user=Depends(require_operator),
 ):
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > settings.artifact_max_bytes + 1024 * 1024:
+        raise HTTPException(status_code=413, detail="artifact exceeds the upload limit")
     try:
         artifact = ArtifactService(db).store(
             file.file,
