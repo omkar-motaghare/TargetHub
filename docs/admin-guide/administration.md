@@ -99,6 +99,35 @@ platform, agent version and discovered resources.
   host is lost or compromised). A disabled or revoked agent name can be re-enrolled.
 - Offline and back-online transitions are announced to webhooks (`agent.offline`, `agent.online`).
 
+## Board health checks
+
+A health check powers a board and waits for text on its serial console (a boot banner or login prompt). It
+catches boards that have silently stopped booting before an engineer does. Configure it per target with
+`PUT /api/v1/targets/<id>/health-check` (admin only; there is no web UI page for it yet):
+
+```json
+{"enabled": true, "boot_pattern": "login:", "interval_minutes": 1440, "boot_timeout_seconds": 60,
+ "power_operation": "cycle", "failure_threshold": 2, "auto_maintenance": true}
+```
+
+The target needs one enabled **serial** and one enabled **power** capability. How a check runs:
+
+1. TargetHub books the board for the check as the user `healthcheck`. If somebody has it reserved, the check is
+   **skipped** (not a failure) and retried within 15 minutes.
+2. It opens the console, discards old output, applies `power_operation` (`cycle`, `reset` or `on`) and reads
+   until `boot_pattern` appears or `boot_timeout_seconds` pass.
+3. It always releases the board afterwards. The result is stored (the last 100 are kept) and shown with
+   `GET .../health-check/results`.
+4. After `failure_threshold` failures in a row the board goes into **maintenance** with the reason "Health
+   check failed: ...", users are told through the usual `target.status` notification and webhook, and the
+   failure appears under **Admin → Overview**. Set `auto_maintenance` to `false` to only report.
+5. A board quarantined by its own check is checked again on schedule and **returns to service** when a check
+   passes. Boards an admin put in maintenance by hand are left alone.
+
+`POST .../health-check/run` runs a check immediately. The operations of each check appear in the activity log as the user `healthcheck`, and
+`targethub_health_checks_total{status}` is exported on `/metrics`. A check that cycles power is disruptive,
+so choose the interval and quiet hours accordingly.
+
 ## Firmware artifacts
 
 Users with the *user* or *admin* role can upload firmware images (`POST /api/v1/artifacts`, or

@@ -3,6 +3,7 @@ from app.models.agent_operation import AgentOperation
 from app.models.artifact import Artifact
 from app.models.audit import AuditLog
 from app.models.base import Base
+from app.models.health_check import HealthCheck, HealthCheckResult
 from app.models.lab import AppSetting, Notification, WaitlistEntry
 from app.models.reservation import Reservation
 from app.models.serial_log import SerialLogChunk
@@ -19,6 +20,8 @@ __all__ = [
     "Artifact",
     "AuditLog",
     "Base",
+    "HealthCheck",
+    "HealthCheckResult",
     "Notification",
     "Reservation",
     "SerialLogChunk",

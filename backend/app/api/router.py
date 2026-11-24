@@ -4,6 +4,7 @@ from app.api.v1.agents import router as agents_router
 from app.api.v1.artifacts import router as artifacts_router
 from app.api.v1.audit import router as audit_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.health_checks import router as health_checks_router
 from app.api.v1.lab import router as lab_router
 from app.api.v1.labs import router as labs_router
 from app.api.v1.providers import router as providers_router
@@ -29,3 +30,4 @@ api_router.include_router(labs_router)
 api_router.include_router(lab_router)
 api_router.include_router(system_router)
 api_router.include_router(artifacts_router)
+api_router.include_router(health_checks_router)

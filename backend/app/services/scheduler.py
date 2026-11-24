@@ -29,6 +29,7 @@ from app.repositories.reservation_repository import ReservationRepository
 from app.repositories.serial_log_repository import SerialLogRepository
 from app.repositories.session_repository import SessionRepository
 from app.services.agent_service import AgentService
+from app.services.health_check_service import purge_results, run_due_health_checks
 from app.services.lab_settings import LabSettings
 from app.services.notifier import Notifier
 from app.services.waitlist_service import WaitlistService
@@ -120,6 +121,7 @@ def run_maintenance(db: Session, now: datetime | None = None) -> dict[str, int]:
             AgentOperation.requested_at < now - OPERATION_RETENTION,
         )
     ).rowcount or 0
+    stats["health_results_purged"] = purge_results(db, now)
     db.execute(delete(Notification).where(Notification.created_at < now - NOTIFICATION_RETENTION))
     db.execute(delete(RefreshToken).where(RefreshToken.expires_at < now - timedelta(days=1)))
     stats["audit_purged"] = db.execute(
@@ -173,6 +175,9 @@ async def scheduler_loop(app, stop: asyncio.Event) -> None:
             busy = {key: value for key, value in stats.items() if value}
             if busy:
                 logger.info(f"scheduler: {busy}")
+            checked = await run_due_health_checks(_session_factory(app))
+            if checked:
+                logger.info(f"scheduler: ran {checked} health check(s)")
         except Exception as exc:
             logger.warning(f"scheduler tick failed: {exc}")
         try:

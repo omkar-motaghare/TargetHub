@@ -14,6 +14,7 @@ from app.api.dependencies import get_db, require_role
 from app.core.config import settings
 from app.db.models.user import User
 from app.models.agent import Agent, AgentResource
+from app.models.health_check import HealthCheck
 from app.models.lab import WaitlistEntry
 from app.models.reservation import Reservation
 from app.models.session import TargetSession
@@ -100,6 +101,27 @@ def _capability_issues(db: Session) -> list[Issue]:
     return issues
 
 
+def _health_check_issues(db: Session) -> list[Issue]:
+    issues: list[Issue] = []
+    rows = db.execute(
+        select(HealthCheck, Target.name, Target.status)
+        .join(Target, Target.id == HealthCheck.target_id)
+        .where(HealthCheck.enabled.is_(True), HealthCheck.consecutive_failures > 0)
+    ).all()
+    for check, name, status in rows:
+        quarantined = check.maintenance_by_check and status == "maintenance"
+        outcome = "board is in maintenance" if quarantined else f"{check.consecutive_failures} failure(s) so far"
+        issues.append(
+            Issue(
+                severity="error" if quarantined else "warning",
+                message=f"{name}: health check failed ({outcome}). {check.last_message or ''}".strip(),
+                target_id=check.target_id,
+                target_name=name,
+            )
+        )
+    return issues
+
+
 @router.get("/overview")
 def overview(db: DB, _admin=Depends(require_role("admin"))) -> dict[str, Any]:
     AgentService(AgentRepository(db)).mark_stale_offline()
@@ -126,7 +148,7 @@ def overview(db: DB, _admin=Depends(require_role("admin"))) -> dict[str, Any]:
             "online": sum(1 for agent in agents if agent.enabled and agent.status == "online"),
             "disabled": sum(1 for agent in agents if not agent.enabled),
         },
-        "issues": [issue.model_dump() for issue in _capability_issues(db)],
+        "issues": [issue.model_dump() for issue in [*_capability_issues(db), *_health_check_issues(db)]],
     }
 
 
