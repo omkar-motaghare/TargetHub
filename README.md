@@ -57,6 +57,9 @@ and firmware deployment, and release it when they are done. Everything works fro
 | **Power** | Three backends: the **DD (Doordarshan) REST power system** called from the server (no agent needed), a generic **HTTP power controller** (any PDU or relay with a simple REST API), or relays and GPIO lines on an agent. Power on, off, cycle, reset and status. |
 | **Firmware deploy** | **Upload the image to TargetHub** and deploy it by id, or give an HTTPS artifact URL and its SHA-256. Uploads are stored on the server and handed to the agent through short-lived signed links. The agent verifies the checksum before running your configured flashing tool (for example `st-flash`, `openocd` or `esptool`). A mismatch is refused before anything is flashed. |
 | **Agents** | One small Python file for **Linux, Raspberry Pi and Windows** hosts. Agents connect outward to the server (no inbound ports needed), so they work behind NAT. Serial ports, GPIO lines and flashing commands are declared in the agent's own config, so the server cannot make an agent open arbitrary devices or run arbitrary commands. |
+| **SSH, Telnet and debugger** | `targethub tunnel <session>` forwards a board's SSH/Telnet port, or an OpenOCD/J-Link GDB server the agent starts for you, to your computer through the agent. Nothing on the lab network is exposed. |
+| **Teams** | Group users and reserve boards for a team; everyone else sees the board but cannot book it. Boards without a team stay open. |
+| **Transcript search** | `targethub grep "kernel panic"` finds which session a board printed a message in. |
 | **Health checks** | Scheduled power-and-expect-banner checks per board. A board that keeps failing is put into maintenance automatically, and returns to service when a later check passes. |
 | **Usage reports** | Utilisation per board and tag, idle reservations, per-user hours and waitlist times, as JSON or CSV (admin). |
 | **Accounts** | Local accounts with three roles: **admin** (manages everything), **user** (reserves and uses boards) and **viewer** (read-only). Rotating sign-in tokens, personal API tokens for scripts and CI, rate-limited login, and an audit log of every change. |
@@ -258,6 +261,8 @@ targethub console <session-id>            # interactive console in your terminal
 targethub release STM32-01
 targethub deploy <session-id> --file build/fw.bin   # upload firmware and deploy it
 targethub report --days 30                          # usage report (admin)
+targethub tunnel <session-id> --local-port 2222     # then: ssh -p 2222 root@127.0.0.1
+targethub grep "kernel panic" --days 14             # search console transcripts
 ```
 
 - **VS Code:** install the TargetHub extension, sign in with an API token, then use the *TargetHub: …* commands
@@ -342,8 +347,9 @@ docs/               Documentation (MkDocs)
 
 ## Roadmap and contributing
 
-Done since 0.2.0 (unreleased): artifact upload, board health checks and usage reports. Planned: SSH and Telnet
-proxying, J-Link debugging, teams and projects, and single sign-on. See the [roadmap](docs/development/ROADMAP.md).
+Done since 0.2.0 (unreleased): artifact upload (local or S3), board health checks, usage reports, SSH/Telnet/GDB
+tunnels, teams, transcript search and provider plugins. Planned: single sign-on, session replay and per-team
+policy limits. See the [roadmap](docs/development/ROADMAP.md).
 
 Issues and pull requests are welcome. Run the test suites described in the
 [development guide](docs/developer-guide/local-docker-development.md) before opening a pull request.
