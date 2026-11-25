@@ -12,6 +12,10 @@
   in Admin → Overview. API under `/api/v1/targets/<id>/health-check`.
 - **Usage reports** (admin): utilisation per target and tag, idle reservations, per-user hours and waitlist
   times as JSON or CSV; `targethub report`.
+- **SSH, Telnet and debugger tunnels**: a new `tunnel` capability forwards a TCP service next to the agent
+  (a board's SSH/Telnet server, or an OpenOCD/J-Link GDB server the agent starts for the session) to the
+  user's computer with `targethub tunnel <session> [--local-port N | --stdio]`. The destination and helper
+  command come only from the agent's local config; sessions are exclusive and close with the reservation.
 - Web UI: upload or pick firmware in the deploy panel, **Admin → Health checks** and **Admin → Reports** (with CSV download).
 - README rewrite and `scripts/setup.sh`, a one-command setup for Linux and macOS.
 

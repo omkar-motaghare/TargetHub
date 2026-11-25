@@ -317,6 +317,9 @@ class TargetHubClient:
     def serial_ws_url(self, session_id: str) -> str:
         return self.base_url.replace("http", "ws", 1) + f"/api/v1/sessions/{session_id}/serial/ws"
 
+    def tunnel_ws_url(self, session_id: str) -> str:
+        return self.base_url.replace("http", "ws", 1) + f"/api/v1/sessions/{session_id}/tunnel/ws"
+
     def power(self, session_id: str, operation: str) -> dict[str, Any]:
         return self.execute(session_id, operation)
 

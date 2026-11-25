@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 import time
 from datetime import UTC, datetime, timedelta
@@ -23,10 +24,12 @@ from app.services.operation_signals import (
 SERIAL_OPERATION_ALLOWLIST = ("open", "read", "write", "close")
 POWER_OPERATION_ALLOWLIST = ("status", "on", "off", "reset", "cycle")
 DEPLOY_OPERATION_ALLOWLIST = ("deploy", "status")
+TUNNEL_OPERATION_ALLOWLIST = ("open", "read", "write", "close")
 AGENT_OPERATION_ALLOWLISTS = {
     "serial": SERIAL_OPERATION_ALLOWLIST,
     "power": POWER_OPERATION_ALLOWLIST,
     "deploy": DEPLOY_OPERATION_ALLOWLIST,
+    "tunnel": TUNNEL_OPERATION_ALLOWLIST,
 }
 ALL_AGENT_OPERATIONS = sorted({op for ops in AGENT_OPERATION_ALLOWLISTS.values() for op in ops})
 # Long-running families get a larger wait/lease window than the serial default.
@@ -35,6 +38,7 @@ PENDING_EXPIRY_SECONDS = 900
 TERMINAL_STATUSES = {"completed", "failed", "cancelled", "timed_out"}
 # Serial reads may block on the Agent for up to this long waiting for data.
 MAX_SERIAL_READ_WAIT_MS = 5000
+TUNNEL_MAX_B64_CHARS = 87384  # 64 KiB of data, base64 encoded
 SHA256_HEX_LENGTH = 64
 DEFAULT_OPERATION_TIMEOUT_SECONDS = float(os.getenv("TARGETHUB_AGENT_OPERATION_TIMEOUT_SECONDS", "12"))
 DEFAULT_POLL_INTERVAL_SECONDS = float(os.getenv("TARGETHUB_AGENT_OPERATION_POLL_INTERVAL_SECONDS", "0.1"))
@@ -299,6 +303,8 @@ class AgentOperationService:
     def _sanitize_params(cls, family: str, operation: str, params: dict[str, Any]) -> dict[str, Any]:
         if family == "serial":
             return cls._sanitize_serial_params(operation, params)
+        if family == "tunnel":
+            return cls._sanitize_tunnel_params(operation, params)
         if family == "deploy" and operation == "deploy":
             url = params.get("url")
             digest = params.get("sha256")
@@ -312,6 +318,21 @@ class AgentOperationService:
                 raise ConflictResource("Deploy requires a 64-character hex 'sha256'")
             return {"url": url, "sha256": digest.lower()}
         return {}
+
+    @staticmethod
+    def _sanitize_tunnel_params(operation: str, params: dict[str, Any]) -> dict[str, Any]:
+        if operation in {"open", "close"}:
+            return {}
+        if operation == "read":
+            return AgentOperationService._sanitize_serial_params("read", params)
+        encoded = params.get("data_b64", "")
+        if not isinstance(encoded, str) or len(encoded) > TUNNEL_MAX_B64_CHARS:
+            raise ConflictResource("Tunnel write needs base64 'data_b64' of at most 64 KiB")
+        try:
+            base64.b64decode(encoded, validate=True)
+        except ValueError as exc:
+            raise ConflictResource("Tunnel write 'data_b64' is not valid base64") from exc
+        return {"data_b64": encoded}
 
     @staticmethod
     def _sanitize_serial_params(operation: str, params: dict[str, Any]) -> dict[str, Any]:

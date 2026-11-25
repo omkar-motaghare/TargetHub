@@ -85,6 +85,14 @@ def build_parser() -> argparse.ArgumentParser:
     console = sub.add_parser("console", help="interactive serial console (needs: pip install websockets)")
     console.add_argument("session_id")
 
+    tunnel = sub.add_parser(
+        "tunnel",
+        help="forward a local port (or stdio) to the board's SSH/Telnet/GDB service (needs: pip install websockets)",
+    )
+    tunnel.add_argument("session_id", help="id of a session on a 'tunnel' capability")
+    tunnel.add_argument("--local-port", type=int, default=0, help="local port to listen on (default: pick a free one)")
+    tunnel.add_argument("--stdio", action="store_true", help="relay stdin/stdout instead (for ssh ProxyCommand)")
+
     log = sub.add_parser("log", help="download a serial session transcript")
     log.add_argument("session_id")
     log.add_argument("--include-input", action="store_true")
@@ -216,6 +224,116 @@ def run_console(client: TargetHubClient, session_id: str) -> int:  # pragma: no 
     return 0
 
 
+def _connect_tunnel(client: TargetHubClient, session_id: str):
+    """Open and authenticate a tunnel WebSocket; returns it, or raises RuntimeError."""
+    from websockets.sync.client import connect
+
+    ws = connect(client.tunnel_ws_url(session_id), open_timeout=15, max_size=None)
+    ws.send(json.dumps({"type": "auth", "token": client.token}))
+    ready = json.loads(ws.recv(timeout=30))
+    if ready.get("type") != "ready":
+        ws.close()
+        raise RuntimeError(str(ready.get("reason", ready)))
+    return ws
+
+
+def relay(ws: Any, read_local: Callable[[], bytes], write_local: Callable[[bytes], None], log: Callable[[str], None]) -> None:
+    """Copy bytes between the tunnel WebSocket and a local endpoint until either side ends."""
+    stop = threading.Event()
+
+    def from_board() -> None:
+        while not stop.is_set():
+            try:
+                message = ws.recv(timeout=1)
+            except TimeoutError:
+                continue
+            except Exception:  # noqa: BLE001 - socket closed
+                break
+            if isinstance(message, bytes):
+                try:
+                    write_local(message)
+                except OSError:
+                    break
+                continue
+            info = json.loads(message)
+            if info.get("type") == "notice":
+                log(f"[targethub] {info['message']}")
+            elif info.get("type") == "closed":
+                log(f"[targethub] {info.get('reason')}")
+                break
+        stop.set()
+
+    def from_local() -> None:
+        try:
+            while not stop.is_set():
+                data = read_local()
+                if not data:
+                    break
+                ws.send(data)
+        except Exception:  # noqa: BLE001 - local endpoint or socket closed
+            pass
+        stop.set()
+
+    threads = [threading.Thread(target=from_board, daemon=True), threading.Thread(target=from_local, daemon=True)]
+    for thread in threads:
+        thread.start()
+    stop.wait()
+    try:
+        ws.close()
+    except Exception:  # noqa: BLE001 - best effort
+        pass
+    threads[0].join(timeout=3)  # the local reader unblocks when its endpoint is closed by the caller
+
+
+def run_tunnel(client: TargetHubClient, session_id: str, local_port: int, stdio: bool) -> int:  # pragma: no cover - interactive
+    try:
+        import websockets.sync.client  # noqa: F401
+    except ImportError:
+        sys.stderr.write("error: the tunnel needs the websockets package: pip install websockets\n")
+        return 1
+
+    def log(text: str) -> None:
+        sys.stderr.write(text + "\n")
+
+    if stdio:
+        try:
+            ws = _connect_tunnel(client, session_id)
+        except Exception as exc:  # noqa: BLE001
+            log(f"error: {exc}")
+            return 1
+        stdin, stdout = sys.stdin.buffer, sys.stdout.buffer
+
+        def write_out(data: bytes) -> None:
+            stdout.write(data)
+            stdout.flush()
+
+        relay(ws, lambda: os.read(stdin.fileno(), 65536), write_out, lambda _t: None)
+        return 0
+
+    listener = socket.socket()
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", local_port))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    log(f"Tunnel ready on 127.0.0.1:{port}. Example: ssh -p {port} user@127.0.0.1  or  target remote :{port}. Ctrl+C to stop.")
+    try:
+        while True:
+            conn, _addr = listener.accept()
+            try:
+                ws = _connect_tunnel(client, session_id)
+            except Exception as exc:  # noqa: BLE001
+                log(f"error: {exc}")
+                conn.close()
+                return 1
+            with conn:
+                relay(ws, lambda: conn.recv(65536), conn.sendall, log)
+            log("[targethub] connection ended; waiting for the next one")
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        listener.close()
+
+
 def _raw_keys(stop: threading.Event):  # pragma: no cover - interactive
     if os.name == "nt":
         import msvcrt
@@ -305,6 +423,8 @@ def dispatch(client: TargetHubClient, args: argparse.Namespace) -> int:
         sys.stdout.write(run_serial(client, args.session_id, args.send, args.wait, args.expect))
     elif command == "console":
         return run_console(client, args.session_id)
+    elif command == "tunnel":
+        return run_tunnel(client, args.session_id, args.local_port, args.stdio)
     elif command == "log":
         sys.stdout.write(client.serial_log(args.session_id, args.include_input))
     elif command == "deploy":

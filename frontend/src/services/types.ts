@@ -42,6 +42,7 @@ export type CapabilityType =
   | 'power'
   | 'reset'
   | 'deploy'
+  | 'tunnel'
 
 export type CapabilityHosting = 'agent' | 'server'
 

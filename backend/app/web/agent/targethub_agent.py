@@ -16,6 +16,7 @@ operations on the same resource are serialized.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import logging
@@ -71,6 +72,8 @@ SERIAL_COALESCE_SECONDS = 0.03
 MAX_USB_DEVICES = 32
 MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
 DEFAULT_DEPLOY_TIMEOUT = 300
+DEFAULT_TUNNEL_START_TIMEOUT = 10.0
+MAX_TUNNEL_WRITE_BYTES = 65536
 DEFAULT_GPIO_BASE = "/sys/class/gpio"
 DEFAULT_CONFIG_PATH = (
     r"C:\ProgramData\TargetHub\agent\config.json" if IS_WINDOWS else "/etc/targethub-agent/config.json"
@@ -828,6 +831,210 @@ class SerialRuntime:
         return {"success": True, "message": "Serial connection opened", "data": {"path": path, **mode}}
 
 
+# --------------------------------------------------------------------------- tunnel
+
+
+class TcpChannel(SerialChannel):
+    """One open TCP connection (SSH, Telnet, GDB remote...) with a background reader."""
+
+    def __init__(self, resource_id: str, session_id: str, label: str, sock: socket.socket, process=None):
+        self.eof = False
+        self.process = process
+        super().__init__(resource_id, session_id, label, port=sock)
+
+    def _read_loop(self) -> None:
+        while not self._closed.is_set():
+            try:
+                data = self.port.recv(4096)
+            except TimeoutError:
+                continue
+            except OSError:
+                data = b""
+            if not data:
+                if not self._closed.is_set():
+                    self.eof = True
+                    self._closed.set()
+                    with self._cond:
+                        self._cond.notify_all()
+                return
+            self._append(data)
+
+    def write(self, data: bytes) -> int:
+        self.last_activity = time.monotonic()
+        if self.eof:
+            raise ConnectionError("the remote side closed the connection")
+        self.port.sendall(data)
+        return len(data)
+
+    def close(self) -> None:
+        super().close()
+        process, self.process = self.process, None
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:  # pragma: no cover - stubborn helper
+                process.kill()
+                process.wait(timeout=5)
+
+
+class TcpRuntime:
+    """TCP tunnels to services next to the Agent, one session per resource at a time.
+
+    The destination (host, port) and an optional helper command (for example OpenOCD or a J-Link
+    GDB server) come from this Agent's local configuration only; the hub cannot choose them.
+    """
+
+    def __init__(self, idle_timeout: float = DEFAULT_SERIAL_IDLE_TIMEOUT) -> None:
+        self._channels: dict[str, TcpChannel] = {}
+        self._lock = threading.Lock()
+        self.idle_timeout = idle_timeout
+
+    def close_all(self) -> None:
+        with self._lock:
+            channels = list(self._channels.values())
+            self._channels.clear()
+        for channel in channels:
+            channel.close()
+
+    def reap_idle(self) -> int:
+        cutoff = time.monotonic() - self.idle_timeout
+        with self._lock:
+            stale = [key for key, channel in self._channels.items() if channel.last_activity < cutoff]
+            channels = [self._channels.pop(key) for key in stale]
+        for channel in channels:
+            log.info("closing idle tunnel %s (session %s)", channel.path, channel.session_id)
+            channel.close()
+        return len(channels)
+
+    @staticmethod
+    def _destination(metadata: dict) -> tuple[str, int] | None:
+        host = metadata.get("host", "127.0.0.1")
+        try:
+            port = int(metadata.get("port"))
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(host, str) or not host or not 0 < port < 65536:
+            return None
+        return host, port
+
+    def execute(self, operation_payload: dict, metadata: dict) -> dict:
+        operation = str(operation_payload.get("operation", "")).strip().lower()
+        params = operation_payload.get("params") or {}
+        session_id = str(operation_payload.get("session_id", ""))
+        resource_id = str(operation_payload.get("resource_id", ""))
+        if not session_id or not resource_id:
+            return {"success": False, "message": "Operation is missing session/resource binding"}
+        destination = self._destination(metadata)
+        if destination is None:
+            return {"success": False, "message": "Tunnel resource has no valid host/port on this Agent"}
+        label = f"{destination[0]}:{destination[1]}"
+
+        if operation == "open":
+            return self._open(session_id, resource_id, label, destination, metadata)
+
+        if operation == "close":
+            with self._lock:
+                channel = self._channels.get(resource_id)
+                if channel is None or channel.session_id != session_id:
+                    return {"success": True, "message": "Tunnel already closed", "data": {"endpoint": label}}
+                self._channels.pop(resource_id)
+            channel.close()
+            return {"success": True, "message": "Tunnel closed", "data": {"endpoint": label}}
+
+        with self._lock:
+            channel = self._channels.get(resource_id)
+        if channel is None or channel.session_id != session_id:
+            return {"success": False, "message": "Tunnel is not open"}
+
+        if operation == "write":
+            try:
+                payload = base64.b64decode(str(params.get("data_b64", "")), validate=True)
+            except ValueError:
+                return {"success": False, "message": "Tunnel write needs base64 'data_b64'"}
+            if len(payload) > MAX_TUNNEL_WRITE_BYTES:
+                return {"success": False, "message": "Tunnel write is too large"}
+            try:
+                written = channel.write(payload)
+            except OSError as exc:
+                return {"success": False, "message": f"Failed to write to the tunnel: {exc}"}
+            return {"success": True, "message": "Tunnel data written", "data": {"bytes_written": written}}
+
+        if operation == "read":
+            wait = max(0.0, min(int(params.get("wait_ms") or 0) / 1000.0, MAX_SERIAL_READ_WAIT_SECONDS))
+            size = max(1, min(int(params.get("size", 4096)), MAX_SERIAL_READ_SIZE))
+            data, dropped = channel.read(size, wait)
+            eof = channel.eof and not data
+            return {
+                "success": True,
+                "message": "Tunnel data read",
+                "data": {
+                    "bytes_read": len(data),
+                    "data_b64": base64.b64encode(data).decode("ascii"),
+                    "dropped_bytes": dropped,
+                    "eof": eof,
+                },
+            }
+
+        return {"success": False, "message": f"Unsupported tunnel operation '{operation}'"}
+
+    def _open(self, session_id: str, resource_id: str, label: str, destination, metadata: dict) -> dict:
+        with self._lock:
+            existing = self._channels.get(resource_id)
+            if existing is not None and existing.session_id == session_id and not existing.eof:
+                return {"success": True, "message": "Tunnel already open", "data": {"endpoint": label}}
+            if existing is not None:
+                # Dispatch only happens for active sessions, so another owner (or a dead
+                # connection) means the previous session is over: take the tunnel over.
+                self._channels.pop(resource_id)
+        if existing is not None:
+            existing.close()
+
+        process = None
+        command = metadata.get("command")
+        if command:
+            if not isinstance(command, list) or not all(isinstance(part, str) for part in command):
+                return {"success": False, "message": "Tunnel 'command' must be a list of strings"}
+            try:
+                process = subprocess.Popen(  # noqa: S603 - operator-configured command, no shell
+                    command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+            except OSError as exc:
+                return {"success": False, "message": f"Could not start the helper command: {exc}"}
+        try:
+            start_timeout = float(metadata.get("start_timeout", DEFAULT_TUNNEL_START_TIMEOUT))
+        except (TypeError, ValueError):
+            start_timeout = DEFAULT_TUNNEL_START_TIMEOUT
+        start_timeout = max(1.0, min(start_timeout, 60.0)) if process is not None else 5.0
+
+        sock = None
+        deadline = time.monotonic() + start_timeout
+        error: Exception | None = None
+        while sock is None:
+            try:
+                sock = socket.create_connection(destination, timeout=min(5.0, start_timeout))
+            except OSError as exc:
+                error = exc
+                if process is not None and process.poll() is not None:
+                    error = RuntimeError(f"helper command exited with status {process.returncode}")
+                    break
+                if process is None or time.monotonic() >= deadline:
+                    break
+                time.sleep(0.2)
+        if sock is None:
+            if process is not None and process.poll() is None:
+                process.terminate()
+                process.wait(timeout=5)
+            return {"success": False, "message": f"Could not connect to {label}: {error}"}
+
+        sock.settimeout(0.5)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        channel = TcpChannel(resource_id, session_id, label, sock, process=process)
+        with self._lock:
+            self._channels[resource_id] = channel
+        return {"success": True, "message": "Tunnel opened", "data": {"endpoint": label}}
+
+
 # --------------------------------------------------------------------------- power
 
 
@@ -1151,6 +1358,9 @@ class OperationRouter:
             allowed_paths=self.allowed_serial_paths,
             idle_timeout=float(config.get("serial_idle_timeout", DEFAULT_SERIAL_IDLE_TIMEOUT)),
         )
+        self.tunnel = TcpRuntime(
+            idle_timeout=float(config.get("serial_idle_timeout", DEFAULT_SERIAL_IDLE_TIMEOUT))
+        )
         self.power = PowerRuntime()
         self.deploy = DeployRuntime()
         self._resource_locks: dict[str, threading.Lock] = {}
@@ -1189,6 +1399,11 @@ class OperationRouter:
         params = payload.get("params") or {}
         if resource_type == "serial":
             return self.serial.execute(payload)
+        if resource_type == "tunnel":
+            metadata = self._local_metadata(str(payload.get("resource_key", "")))
+            if metadata is None:
+                return {"success": False, "message": "Resource is not configured on this Agent"}
+            return self.tunnel.execute(payload, metadata)
         if resource_type in {"power", "reset", "deploy"}:
             resource_key = str(payload.get("resource_key", ""))
             metadata = self._local_metadata(resource_key)
@@ -1252,6 +1467,7 @@ class AgentLoop:
                 self.router.remember_resources(resources)
                 heartbeat(self.config, request_timeout=self.request_timeout, resources=resources)
                 self.router.serial.reap_idle()
+                self.router.tunnel.reap_idle()
                 delay = 0
                 sd_notify("WATCHDOG=1")
                 _stop.wait(self.interval)
@@ -1360,6 +1576,7 @@ def main() -> int:
     finally:
         sd_notify("STOPPING=1")
         router.serial.close_all()
+        router.tunnel.close_all()
     log.info("TargetHub Agent stopped")
     return 0
 

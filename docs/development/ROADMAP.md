@@ -11,10 +11,8 @@ CI with PostgreSQL, Windows and Docker jobs · multi-arch image release workflow
 
 1. **Field validation**: run the [manual checklist](../MANUAL_VERIFICATION_CHECKLIST.md) on real DD
    hardware, a Raspberry Pi with relays and a Windows agent; fix what differs.
-2. **SSH/Telnet access to targets** through the agent (port forwarding bound to the session), so
-   network-booted boards can be reached without exposing them.
-3. **Debugger integration**: J-Link / OpenOCD GDB server started by the agent for the session, reachable
-   through a session-scoped tunnel; VS Code launch configuration.
+2. ~~**SSH/Telnet access to targets**~~ *(done, unreleased: agent tunnels bound to the session, `targethub tunnel`)*
+3. ~~**Debugger integration**~~ *(done, unreleased: the same tunnel starts an OpenOCD/J-Link GDB server for the session; VS Code `miDebuggerServerAddress`)*
 4. ~~**Artifact upload**~~ *(done, unreleased: local disk storage and the deploy panel upload; S3-compatible storage still to do)*
 5. ~~**Board health checks**~~ *(done, unreleased: API, scheduler and Admin → Health checks)*
 6. ~~**Usage reports**~~ *(done, unreleased: Admin → Reports with CSV by target, tag, user; per-team views and charts still to do)*

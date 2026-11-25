@@ -105,3 +105,51 @@ def test_audit_forwards_filters(capsys):
 
     assert cli.main(["audit", "--action", "session.open", "--limit", "5"], factory(handler)) == 0
     assert seen == {"action": "session.open", "limit": "5"}
+
+
+def test_tunnel_relay_copies_bytes_both_ways():
+    import json as _json
+    import queue
+    import socket as _socket
+
+    from targethub_sdk.cli import relay
+
+    class FakeWs:
+        def __init__(self):
+            self.incoming: queue.Queue = queue.Queue()
+            self.sent: list[bytes] = []
+
+        def recv(self, timeout=None):
+            try:
+                return self.incoming.get(timeout=timeout)
+            except queue.Empty:
+                raise TimeoutError from None
+
+        def send(self, data):
+            self.sent.append(data)
+
+        def close(self):
+            pass
+
+    ws = FakeWs()
+    local, remote = _socket.socketpair()
+    logged: list[str] = []
+    ws.incoming.put(b"banner")
+    ws.incoming.put(_json.dumps({"type": "notice", "message": "dropped 3 bytes"}))
+    thread = __import__("threading").Thread(
+        target=relay, args=(ws, lambda: local.recv(1024), local.sendall, logged.append)
+    )
+    thread.start()
+    assert remote.recv(1024) == b"banner"
+    remote.sendall(b"hello")
+    for _ in range(50):
+        if ws.sent:
+            break
+        __import__("time").sleep(0.05)
+    assert ws.sent == [b"hello"]
+    ws.incoming.put(_json.dumps({"type": "closed", "reason": "bye"}))
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert any("dropped 3 bytes" in line for line in logged) and any("bye" in line for line in logged)
+    local.close()
+    remote.close()

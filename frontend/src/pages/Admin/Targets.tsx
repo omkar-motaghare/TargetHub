@@ -65,6 +65,7 @@ const CAPABILITY_TYPES: { value: CapabilityType; label: string }[] = [
   { value: 'power', label: 'Power' },
   { value: 'reset', label: 'Reset' },
   { value: 'deploy', label: 'Firmware deploy' },
+  { value: 'tunnel', label: 'SSH / Telnet / GDB tunnel' },
   { value: 'jlink', label: 'Debugger (J-Link bridge)' },
   { value: 'network', label: 'Network bridge' },
   { value: 'ssh', label: 'SSH bridge' },
@@ -77,6 +78,7 @@ const BACKENDS: Record<CapabilityType, Backend[]> = {
   power: ['agent', 'dd', 'http', 'simulated'],
   reset: ['agent', 'dd', 'http', 'simulated'],
   deploy: ['agent', 'custom', 'simulated'],
+  tunnel: ['agent'],
   jlink: ['custom', 'simulated'],
   network: ['custom', 'simulated'],
   ssh: ['custom', 'simulated'],
@@ -97,6 +99,7 @@ const RESOURCE_TYPES: Record<string, string[]> = {
   power: ['power'],
   reset: ['power', 'reset'],
   deploy: ['deploy'],
+  tunnel: ['tunnel'],
 }
 
 function inferBackend(capability: TargetCapability): Backend {
@@ -543,6 +546,7 @@ export default function AdminTargets() {
               <button className="button ghost" type="button" onClick={() => setForm((current) => ({ ...current, capabilities: [...current.capabilities, newCapability('serial')] }))}>+ Serial</button>
               <button className="button ghost" type="button" onClick={() => setForm((current) => ({ ...current, capabilities: [...current.capabilities, newCapability('power')] }))}>+ Power</button>
               <button className="button ghost" type="button" onClick={() => setForm((current) => ({ ...current, capabilities: [...current.capabilities, newCapability('deploy')] }))}>+ Deploy</button>
+              <button className="button ghost" type="button" onClick={() => setForm((current) => ({ ...current, capabilities: [...current.capabilities, newCapability('tunnel')] }))}>+ Tunnel</button>
             </div>
           </div>
           {form.capabilities.length === 0 && (

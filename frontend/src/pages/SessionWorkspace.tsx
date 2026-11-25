@@ -92,6 +92,32 @@ function formatSize(bytes: number): string {
   return `${bytes} B`
 }
 
+function TunnelPanel({ sessionId }: { sessionId: string }) {
+  const hub = window.location.origin
+  const commands = [
+    { label: 'SSH', text: `targethub --url ${hub} tunnel ${sessionId} --local-port 2222\nssh -p 2222 <user>@127.0.0.1` },
+    { label: 'SSH (one command)', text: `ssh -o ProxyCommand="targethub --url ${hub} tunnel ${sessionId} --stdio" <user>@board` },
+    { label: 'Telnet', text: `targethub --url ${hub} tunnel ${sessionId} --local-port 2323\ntelnet 127.0.0.1 2323` },
+    { label: 'GDB (debugger)', text: `targethub --url ${hub} tunnel ${sessionId} --local-port 3333\n(gdb) target remote :3333` },
+  ]
+  return (
+    <section className="card">
+      <h3 style={{ marginTop: 0 }}>Connect from your computer</h3>
+      <p className="muted">
+        The board is reached through the lab Agent, so nothing needs to be exposed on the network. Install the CLI
+        once (<code>pip install targethub-sdk websockets</code>, then <code>targethub login</code>), then run one of these.
+        Only you can use this session, and the tunnel closes when it ends.
+      </p>
+      {commands.map((item) => (
+        <div key={item.label} style={{ marginBottom: '0.7rem' }}>
+          <strong>{item.label}</strong>
+          <pre className="log-console" aria-label={`${item.label} command`}>{item.text}</pre>
+        </div>
+      ))}
+    </section>
+  )
+}
+
 function DeployPanel({ sessionId, log }: { sessionId: string; log: (line: LogLine) => void }) {
   const [mode, setMode] = useState<'upload' | 'url'>('upload')
   const [url, setUrl] = useState('')
@@ -325,7 +351,8 @@ export default function SessionWorkspace() {
       {active && kind === 'serial' && <SerialConsole sessionId={session.id} onEnded={onConsoleEnded} />}
       {active && (kind === 'power' || kind === 'reset') && <PowerPanel sessionId={session.id} operations={operations} log={addLog} />}
       {active && kind === 'deploy' && <DeployPanel sessionId={session.id} log={addLog} />}
-      {active && !['serial', 'power', 'reset', 'deploy'].includes(kind) && (
+      {active && kind === 'tunnel' && <TunnelPanel sessionId={session.id} />}
+      {active && !['serial', 'power', 'reset', 'deploy', 'tunnel'].includes(kind) && (
         <section className="card">
           <h3 style={{ marginTop: 0 }}>Operations</h3>
           <div className="toolbar">

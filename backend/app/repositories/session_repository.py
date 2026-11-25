@@ -10,7 +10,7 @@ from app.models.agent_operation import AgentOperation
 from app.models.session import TargetSession
 
 # Capability types whose Agent keeps per-session hardware state (an open port).
-AGENT_STATEFUL_CAPABILITIES = {"serial"}
+AGENT_STATEFUL_CAPABILITIES = {"serial", "tunnel"}
 
 
 class SessionRepository:

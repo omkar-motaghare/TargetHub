@@ -64,6 +64,27 @@ The console is a real terminal in your browser (keyboard input goes straight to 
 - Transcripts are kept for the policy's retention period (30 days by default) and are also available
   from the session page later.
 
+### SSH, Telnet and debugger tunnel
+
+Some boards offer SSH or Telnet over the network, or a debug probe offers a GDB server. TargetHub
+forwards these through the lab agent, so you reach the board without any network access to it. Open the
+session, then on your computer (one-time setup: `pip install targethub-sdk websockets`, then
+`targethub login`):
+
+```bash
+targethub tunnel <session-id> --local-port 2222      # leave running
+ssh -p 2222 root@127.0.0.1                           # in another terminal
+
+ssh -o ProxyCommand="targethub tunnel <session-id> --stdio" root@board   # or a single command
+
+targethub tunnel <session-id> --local-port 3333      # debugger
+(gdb) target remote :3333                            # in gdb; VS Code: "miDebuggerServerAddress": "localhost:3333"
+```
+
+The session page shows these commands with your session id filled in. Only you can use the session, one
+connection at a time. When the connection ends the command waits for the next one, and everything stops
+when the reservation ends.
+
 ### Power
 
 **Power on / off / cycle / status**. Disruptive operations ask for confirmation. With a DD power system,

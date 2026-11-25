@@ -55,7 +55,7 @@ export default function AdminAgents() {
   }, [targets])
 
   // Network interfaces and GPIO chips are informational; hide them unless asked.
-  const HARDWARE_TYPES = ['serial', 'power', 'reset', 'deploy']
+  const HARDWARE_TYPES = ['serial', 'power', 'reset', 'deploy', 'tunnel']
 
   async function handleCreate(event: React.FormEvent): Promise<void> {
     event.preventDefault()

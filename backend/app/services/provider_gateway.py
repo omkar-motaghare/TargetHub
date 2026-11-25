@@ -306,14 +306,14 @@ class ProviderGateway:
             logger.warning(f"Failed to store serial transcript: {exc}")
 
     def finish(self, user_id: str, outcome: CompletedOperation) -> dict[str, Any]:
-        quiet = outcome.session.capability_type == "serial" and outcome.operation in {"read", "write"}
+        quiet = outcome.session.capability_type in {"serial", "tunnel"} and outcome.operation in {"read", "write"}
         if quiet:
             # Console reads/writes are high-volume; they go to the transcript and
             # metrics, not one audit row per keystroke.
             metrics.inc(
                 "targethub_provider_operations_total",
                 labels={
-                    "capability": "serial",
+                    "capability": outcome.session.capability_type,
                     "operation": outcome.operation,
                     "success": str(outcome.success).lower(),
                 },

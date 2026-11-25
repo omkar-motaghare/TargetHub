@@ -60,7 +60,7 @@ A target has one or more capabilities. Each is backed by one of these:
 
 | Backend | Where it runs | Use for |
 | --- | --- | --- |
-| **Agent hardware** | On an agent host | Serial consoles (USB-serial, COM ports), GPIO relays, deploy/flash commands. Pick the agent and one of the resources it reported. |
+| **Agent hardware** | On an agent host | Serial consoles (USB-serial, COM ports), GPIO relays, deploy/flash commands, SSH/Telnet/GDB tunnels. Pick the agent and one of the resources it reported. |
 | **DD power system (server)** | On the TargetHub server | DD relay endpoints. No agent needed. See [DD power](../power/dd-power.md). |
 | **HTTP power controller (server)** | On the TargetHub server | Any PDU/relay with the simple REST contract below. |
 | **HTTP bridge (server, JSON config)** | On the TargetHub server | Deploy, debugger and network bridges that implement TargetHub's REST contract. |

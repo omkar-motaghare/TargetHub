@@ -15,6 +15,7 @@ class CapabilityType(StrEnum):
     POWER = "power"
     RESET = "reset"
     DEPLOY = "deploy"
+    TUNNEL = "tunnel"
 
 
 class TargetCapabilityBase(BaseModel):

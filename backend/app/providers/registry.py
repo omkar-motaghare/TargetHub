@@ -27,11 +27,12 @@ CAPABILITY_PROVIDERS: dict[str, str] = {
     "network": "network",
     "jlink": "debugger",
     "deploy": "deploy",
+    "tunnel": "tunnel",
 }
 
 
 # Families an Agent can execute natively (hardware attached to the Agent host).
-AGENT_FAMILIES = {"serial", "power", "deploy"}
+AGENT_FAMILIES = {"serial", "power", "deploy", "tunnel"}
 POWER_DRIVERS = ("dd", "http", "simulated")
 
 

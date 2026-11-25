@@ -54,6 +54,16 @@ describe('SessionWorkspace', () => {
     expect(await screen.findByText('console for s1')).toBeInTheDocument()
   })
 
+  it('shows how to connect SSH, Telnet and GDB through the tunnel', async () => {
+    vi.mocked(api.getSession).mockResolvedValue(makeSession('tunnel'))
+    vi.mocked(api.listSessionOperations).mockResolvedValue({ session_id: 's1', capability_type: 'tunnel', operations: ['open'] })
+    renderWorkspace()
+    expect(await screen.findByText('Connect from your computer')).toBeInTheDocument()
+    expect(screen.getByLabelText('SSH command').textContent).toContain('tunnel s1 --local-port 2222')
+    expect(screen.getByLabelText('GDB (debugger) command').textContent).toContain('target remote :3333')
+    expect(screen.getByLabelText('SSH (one command) command').textContent).toContain('--stdio')
+  })
+
   it('shows power state, offers only supported operations and confirms destructive ones', async () => {
     vi.mocked(api.getSession).mockResolvedValue(makeSession('power'))
     vi.mocked(api.listSessionOperations).mockResolvedValue({ session_id: 's1', capability_type: 'power', operations: ['on', 'off', 'status'] })

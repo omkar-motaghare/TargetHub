@@ -72,7 +72,14 @@ config file, then restart the agent (see [Service management](#service-managemen
      "metadata": {"backend": "gpiod", "chip": "gpiochip0", "line": 17, "active_low": true, "pulse_seconds": 3}},
 
     {"resource_key": "deploy:stm32-01", "resource_type": "deploy", "display_name": "Flash STM32-01",
-     "metadata": {"command": ["st-flash", "--reset", "write", "{artifact}", "0x8000000"], "timeout": 300}}
+     "metadata": {"command": ["st-flash", "--reset", "write", "{artifact}", "0x8000000"], "timeout": 300}},
+
+    {"resource_key": "tunnel:stm32-01-ssh", "resource_type": "tunnel", "display_name": "STM32-01 SSH",
+     "metadata": {"host": "192.168.50.21", "port": 22}},
+
+    {"resource_key": "tunnel:stm32-01-gdb", "resource_type": "tunnel", "display_name": "STM32-01 GDB (OpenOCD)",
+     "metadata": {"host": "127.0.0.1", "port": 3333, "start_timeout": 15,
+                  "command": ["openocd", "-f", "interface/stlink.cfg", "-f", "target/stm32f4x.cfg"]}}
   ]
 }
 ```
@@ -87,6 +94,26 @@ On Windows a serial entry looks like `{"resource_key": "COM5", "resource_type": 
 - One session owns a port at a time. When a session ends (release, expiry, close), the agent closes the
   port. Ports idle for `serial_idle_timeout` seconds (default 900) are closed too.
 - The `targethub` user is added to `dialout` automatically on Linux.
+
+### Tunnel (SSH, Telnet, GDB remote)
+
+A tunnel lets a user reach a TCP service next to the agent (a board's SSH or Telnet server, or a GDB
+server for a debug probe) without exposing it on any network. The user connects through TargetHub with
+`targethub tunnel` (see the [user guide](../user-guide/using-targethub.md#ssh-telnet-and-debugger-tunnel)).
+
+| Key | Meaning |
+| --- | --- |
+| `host` | where the service listens, as seen from the agent (default `127.0.0.1`) |
+| `port` | TCP port, 1 to 65535 |
+| `command` | optional helper to start when a session opens the tunnel and stop when it ends, as a list (no shell), for example OpenOCD or `JLinkGDBServer`. It is never reported to the hub. |
+| `start_timeout` | seconds to wait for the helper to start listening (default 10, maximum 60) |
+
+- The destination comes only from this file. The hub and its users cannot choose a host or port, so a
+  tunnel can never be pointed at another machine.
+- One session owns a tunnel at a time; it closes when the session ends and after `serial_idle_timeout`
+  seconds without traffic (default 900).
+- In the target, add a capability of type **SSH / Telnet / GDB tunnel** and pick this resource. Use one
+  resource per service (one for SSH, one for GDB), each as its own capability.
 
 ### Power (GPIO relays, Linux)
 
