@@ -59,6 +59,7 @@ def join_waitlist(request: WaitlistJoin, db: DB, user=Depends(require_operator))
         tag=request.tag.strip().lower() if request.tag else None,
         duration_minutes=request.duration_minutes,
         note=request.note,
+        privileged=is_admin_user(user),
     )
     AuditService(AuditRepository(db)).record(
         action="waitlist.join", user_id=user.username, target_id=entry.target_id, detail=entry.tag

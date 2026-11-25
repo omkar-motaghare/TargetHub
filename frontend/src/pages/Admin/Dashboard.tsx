@@ -8,12 +8,14 @@ import AdminOverview from './Overview'
 import AdminReports from './Reports'
 import AdminSettings from './Settings'
 import AdminTargets from './Targets'
+import AdminTeams from './Teams'
 import AdminUsers from './Users'
 
 const sections = [
   { key: 'overview', title: 'Overview', render: () => <AdminOverview /> },
   { key: 'targets', title: 'Targets', render: () => <AdminTargets /> },
   { key: 'agents', title: 'Agents', render: () => <AdminAgents /> },
+  { key: 'teams', title: 'Teams', render: () => <AdminTeams /> },
   { key: 'health', title: 'Health checks', render: () => <AdminHealthChecks /> },
   { key: 'reports', title: 'Reports', render: () => <AdminReports /> },
   { key: 'users', title: 'Users', render: () => <AdminUsers /> },

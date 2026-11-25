@@ -17,6 +17,7 @@ const report: UsageReport = {
   ],
   tags: [{ tag: 'stm32', targets: 1, reservations: 2, booked_hours: 12, utilisation_percent: 5 }],
   users: [{ user_id: 'alice', reservations: 2, targets: 1, booked_hours: 14, idle_reservations: 0, idle_hours: 0 }],
+  teams: [{ team: 'firmware', members: 3, active_users: 2, reservations: 2, booked_hours: 14, idle_hours: 0 }],
   idle: [{ reservation_id: 'r1', target: 'B1', user_id: 'bob', starts_at: '2026-11-01T10:00:00Z', hours_held: 2, note: 'flash test' }],
   waitlist: { entries: 3, fulfilled: 2, waiting: 0, cancelled: 0, expired: 1, average_wait_minutes: 60, longest_wait_minutes: 90 },
 }

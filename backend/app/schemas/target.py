@@ -83,6 +83,7 @@ class TargetUpdate(BaseModel):
 class TargetResponse(TargetBase):
     id: str
     capabilities: list[TargetCapabilityResponse] = Field(default_factory=list)
+    teams: list[str] = Field(default_factory=list, description="Teams this board is restricted to (empty: open to all)")
     availability: Availability | None = None
     created_at: datetime
     updated_at: datetime
@@ -93,6 +94,7 @@ class TargetResponse(TargetBase):
 class TargetPublicResponse(TargetBase):
     id: str
     capabilities: list[TargetCapabilityPublicResponse] = Field(default_factory=list)
+    teams: list[str] = Field(default_factory=list, description="Teams this board is restricted to (empty: open to all)")
     availability: Availability | None = None
     created_at: datetime
     updated_at: datetime

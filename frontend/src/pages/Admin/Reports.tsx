@@ -166,6 +166,23 @@ export default function AdminReports() {
             </div>
           </Section>
 
+          <Section title="Per team" kind="teams" days={days} onDownload={triggerDownload}>
+            <div className="table-wrap">
+              <table className="table" aria-label="usage per team">
+                <thead><tr><th>Team</th><th>Members</th><th>Active</th><th>Reservations</th><th>Booked</th><th>Held unused</th></tr></thead>
+                <tbody>
+                  {report.teams.map((row) => (
+                    <tr key={row.team}>
+                      <td>{row.team}</td><td>{row.members}</td><td>{row.active_users}</td><td>{row.reservations}</td>
+                      <td>{row.booked_hours} h</td><td>{row.idle_hours ? `${row.idle_hours} h` : '-'}</td>
+                    </tr>
+                  ))}
+                  {report.teams.length === 0 && <tr><td colSpan={6} className="muted">No teams yet. Create them under Admin → Teams.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </Section>
+
           <Section title="Per user" kind="users" days={days} onDownload={triggerDownload}>
             <div className="table-wrap">
               <table className="table" aria-label="usage per user">

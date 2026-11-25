@@ -362,6 +362,16 @@ class TargetHubClient:
     def delete_artifact(self, artifact_id: str) -> None:
         self._request("DELETE", f"/artifacts/{artifact_id}")
 
+    # ------------------------------------------------------------------ teams
+
+    def my_teams(self) -> list[str]:
+        """Names of the teams you belong to."""
+        return self._request("GET", "/teams/mine")
+
+    def list_teams(self) -> list[dict[str, Any]]:
+        """All teams with members and restricted boards (admin)."""
+        return self._request("GET", "/teams")
+
     # ------------------------------------------------------------------ reports (admin)
 
     def usage_report(self, days: int = 30) -> dict[str, Any]:

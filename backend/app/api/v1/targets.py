@@ -15,6 +15,7 @@ from app.schemas.target import (
     TargetResponse,
     TargetUpdate,
 )
+from app.services import team_service
 from app.services.audit_service import AuditService
 from app.services.notifier import Notifier
 from app.services.reservation_service import availability
@@ -33,9 +34,10 @@ Service = Annotated[TargetService, Depends(get_service)]
 DB = Annotated[Session, Depends(get_db)]
 
 
-def present(target, user, active=None) -> TargetResponse | TargetPublicResponse:
+def present(target, user, active=None, teams=None) -> TargetResponse | TargetPublicResponse:
     model = TargetResponse if is_admin_user(user) else TargetPublicResponse
     response = model.model_validate(target)
+    response.teams = (teams or {}).get(target.id, [])
     if active is not None:
         response.availability = Availability(**availability(target, active.get(target.id, [])))
     return response
@@ -60,7 +62,8 @@ def list_targets(
     """All targets with live availability (who holds each board and until when)."""
     active = _active(db)
     targets = service.repository.list(tag=tag.strip().lower() if tag else None, lab=lab)
-    return [present(target, user, active) for target in targets]
+    teams = team_service.team_names_by_target(db)
+    return [present(target, user, active, teams) for target in targets]
 
 
 @router.get("/tags", response_model=list[str])
@@ -70,7 +73,7 @@ def list_tags(service: Service, _user=Depends(get_current_user)):
 
 @router.get("/{target_id}", response_model=TargetResponse | TargetPublicResponse)
 def get_target(target_id: str, service: Service, db: DB, user=Depends(get_current_user)):
-    return present(service.get_target(target_id), user, _active(db))
+    return present(service.get_target(target_id), user, _active(db), team_service.team_names_by_target(db))
 
 
 @router.post("", response_model=TargetResponse, status_code=201)

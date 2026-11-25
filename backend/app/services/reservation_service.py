@@ -9,6 +9,7 @@ from app.repositories.reservation_repository import ReservationRepository
 from app.repositories.session_repository import SessionRepository
 from app.repositories.target_repository import TargetRepository
 from app.services.lab_settings import ReservationPolicy
+from app.services.team_service import can_use_target, ensure_can_use
 
 # Clock skew tolerated for "start now" requests from clients.
 START_SKEW = timedelta(minutes=5)
@@ -98,6 +99,8 @@ class ReservationService:
         privileged: bool = False,
     ):
         target = self._check_target(target_id)
+        if not privileged:
+            ensure_can_use(self.repository.db, target, user_id)
         now = datetime.now(UTC)
         self._check_window(starts_at, ends_at, now=now, privileged=privileged)
         starts_at = starts_at.astimezone(UTC)
@@ -147,7 +150,9 @@ class ReservationService:
         candidates = [
             target
             for target in self.target_repository.list(tag=tag)
-            if target.enabled and target.status == "available"
+            if target.enabled
+            and target.status == "available"
+            and (privileged or can_use_target(self.repository.db, target.id, user_id))
         ]
         if not candidates:
             raise ResourceNotFound("Available target with tag", tag)

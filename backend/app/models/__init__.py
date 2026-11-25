@@ -10,6 +10,7 @@ from app.models.serial_log import SerialLogChunk
 from app.models.session import TargetSession
 from app.models.target import Target
 from app.models.target_capability import TargetCapability
+from app.models.team import Team, TeamMember, TeamTarget
 
 __all__ = [
     "Agent",
@@ -28,5 +29,8 @@ __all__ = [
     "TargetSession",
     "Target",
     "TargetCapability",
+    "Team",
+    "TeamMember",
+    "TeamTarget",
     "WaitlistEntry",
 ]

@@ -99,6 +99,15 @@ platform, agent version and discovered resources.
   host is lost or compromised). A disabled or revoked agent name can be re-enrolled.
 - Offline and back-online transitions are announced to webhooks (`agent.offline`, `agent.online`).
 
+## Teams
+
+**Admin → Teams** groups users and can reserve boards for a team. A board that belongs to no team is open to
+everyone, as before. Once a board is assigned to one or more teams, only members of at least one of those
+teams can reserve it, reserve it by tag or join its waitlist; everyone else sees the board (with its teams) and
+gets a clear message. Admins can always reserve any board. Deleting a team opens its boards again.
+Existing reservations are never cancelled when membership changes. **Reports** include hours per team
+(a user in several teams counts in each). API: `/api/v1/teams`; CLI: `targethub teams`.
+
 ## Board health checks
 
 A health check powers a board and waits for text on its serial console (a boot banner or login prompt). It

@@ -15,6 +15,7 @@ from app.api.v1.sessions import router as sessions_router
 from app.api.v1.system import router as system_router
 from app.api.v1.target_capabilities import router as target_capabilities_router
 from app.api.v1.targets import router as targets_router
+from app.api.v1.teams import router as teams_router
 from app.api.v1.tunnel_ws import router as tunnel_ws_router
 
 api_router = APIRouter(prefix="/api/v1")
@@ -35,3 +36,4 @@ api_router.include_router(system_router)
 api_router.include_router(artifacts_router)
 api_router.include_router(health_checks_router)
 api_router.include_router(reports_router)
+api_router.include_router(teams_router)

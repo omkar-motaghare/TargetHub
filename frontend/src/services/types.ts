@@ -89,6 +89,7 @@ export type Target = {
   tags: string[]
   enabled: boolean
   capabilities: TargetCapability[]
+  teams?: string[]
   availability?: Availability | null
   created_at: string
   updated_at: string
@@ -380,6 +381,7 @@ export type UsageReport = {
     idle_reservations: number
     idle_hours: number
   }[]
+  teams: { team: string; members: number; active_users: number; reservations: number; booked_hours: number; idle_hours: number }[]
   idle: { reservation_id: string; target: string; user_id: string; starts_at: string; hours_held: number; note: string | null }[]
   waitlist: {
     entries: number
@@ -392,4 +394,14 @@ export type UsageReport = {
   }
 }
 
-export type UsageCsvKind = 'targets' | 'tags' | 'users' | 'idle' | 'waitlist'
+export type UsageCsvKind = 'targets' | 'tags' | 'users' | 'teams' | 'idle' | 'waitlist'
+
+export type Team = {
+  id: string
+  name: string
+  description: string | null
+  members: string[]
+  target_ids: string[]
+}
+
+export type TeamInput = { name?: string; description?: string | null; members?: string[]; target_ids?: string[] }

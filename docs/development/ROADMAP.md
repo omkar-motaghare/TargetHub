@@ -16,7 +16,7 @@ CI with PostgreSQL, Windows and Docker jobs · multi-arch image release workflow
 4. ~~**Artifact upload**~~ *(done, unreleased: local disk storage and the deploy panel upload; S3-compatible storage still to do)*
 5. ~~**Board health checks**~~ *(done, unreleased: API, scheduler and Admin → Health checks)*
 6. ~~**Usage reports**~~ *(done, unreleased: Admin → Reports with CSV by target, tag, user; per-team views and charts still to do)*
-7. **Teams / projects**: group users and restrict targets per team; per-team policies.
+7. ~~**Teams / projects**~~ *(done, unreleased: teams, team-restricted boards, per-team report; per-team policy limits still to do)*
 8. **SSO**: OIDC (Azure AD/Entra ID, Google, Keycloak) and LDAP, alongside local accounts.
 9. **Recording console sessions for replay** and searchable transcripts.
 10. **Plugin interface** for third-party power and debug providers without forking the server.

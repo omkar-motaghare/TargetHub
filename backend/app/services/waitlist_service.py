@@ -16,6 +16,7 @@ from app.repositories.target_repository import TargetRepository
 from app.services.lab_settings import LabSettings
 from app.services.notifier import Notifier
 from app.services.reservation_service import ReservationService
+from app.services.team_service import can_use_target, ensure_can_use
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -48,6 +49,7 @@ class WaitlistService:
         tag: str | None,
         duration_minutes: int,
         note: str | None = None,
+        privileged: bool = False,
     ) -> WaitlistEntry:
         if bool(target_id) == bool(tag):
             raise ConflictResource("Join the waitlist for exactly one of target_id or tag")
@@ -61,7 +63,13 @@ class WaitlistService:
                 raise ResourceNotFound("Target", target_id)
             if not target.enabled or target.status == "retired":
                 raise ConflictResource("Target is not reservable")
-        elif not self.targets.list(tag=tag):
+            if not privileged:
+                ensure_can_use(self.db, target, user_id)
+        elif not [
+            item
+            for item in self.targets.list(tag=tag)
+            if privileged or can_use_target(self.db, item.id, user_id)
+        ]:
             raise ResourceNotFound("Target with tag", tag or "")
         duplicate = self.db.scalar(
             select(WaitlistEntry).where(

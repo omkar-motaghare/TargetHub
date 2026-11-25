@@ -13,6 +13,7 @@ from app.models.lab import WaitlistEntry
 from app.models.reservation import Reservation
 from app.models.session import TargetSession
 from app.models.target import Target
+from app.models.team import Team, TeamMember
 from app.services.health_check_service import HEALTH_USER
 
 MAX_SPAN_DAYS = 366
@@ -170,6 +171,26 @@ def usage_report(db: Session, start: datetime, end: datetime, now: datetime | No
     )
     idle_rows.sort(key=lambda item: -item["hours_held"])
 
+    members_by_team: dict[str, set[str]] = {name: set() for name in db.scalars(select(Team.name)).all()}
+    for team_name, username in db.execute(
+        select(Team.name, TeamMember.username).join(TeamMember, TeamMember.team_id == Team.id)
+    ).all():
+        members_by_team[team_name].add(username)
+    team_rows = []
+    for team_name, members in sorted(members_by_team.items()):
+        used = [per_user[name] for name in members if name in per_user]
+        team_rows.append(
+            {
+                "team": team_name,
+                "members": len(members),
+                "active_users": len(used),
+                "reservations": sum(item["reservations"] for item in used),
+                "booked_hours": _hours(sum(item["booked_seconds"] for item in used)),
+                "idle_hours": _hours(sum(item["idle_seconds"] for item in used)),
+            }
+        )
+    team_rows.sort(key=lambda item: -item["booked_hours"])
+
     total_booked = sum(item["booked_hours"] for item in target_rows)
     total_idle = sum(item["idle_hours"] for item in target_rows)
     return {
@@ -186,6 +207,7 @@ def usage_report(db: Session, start: datetime, end: datetime, now: datetime | No
         "targets": target_rows,
         "tags": tag_rows,
         "users": user_rows,
+        "teams": team_rows,
         "idle": idle_rows[:IDLE_ROWS],
         "waitlist": waitlist_summary(db, start, end, targets),
     }

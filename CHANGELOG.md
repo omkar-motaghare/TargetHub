@@ -16,11 +16,14 @@
   (a board's SSH/Telnet server, or an OpenOCD/J-Link GDB server the agent starts for the session) to the
   user's computer with `targethub tunnel <session> [--local-port N | --stdio]`. The destination and helper
   command come only from the agent's local config; sessions are exclusive and close with the reservation.
+- **Teams**: group users and reserve boards for a team (Admin → Teams, `/api/v1/teams`, `targethub teams`). Boards
+  without a team stay open; restricted boards can be reserved or queued for only by members and admins. The
+  usage report adds hours per team.
 - Web UI: upload or pick firmware in the deploy panel, **Admin → Health checks** and **Admin → Reports** (with CSV download).
 - README rewrite and `scripts/setup.sh`, a one-command setup for Linux and macOS.
 
 ### Upgrade notes
-- Two migrations run automatically (`artifacts`, health checks). Back up before upgrading. Uploaded artifacts
+- Three migrations run automatically (`artifacts`, health checks, teams). Back up before upgrading. Uploaded artifacts
   are stored in the `artifacts` volume, which `scripts/backup.sh` does not include.
 
 ## v0.2.0 — 2026-10-27

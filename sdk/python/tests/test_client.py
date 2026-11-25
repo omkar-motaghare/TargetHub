@@ -193,3 +193,16 @@ def test_usage_report_requests_the_period_ending_now():
     assert "from" in params and "to" in params
     assert client.usage_report_csv("idle", days=7) == "name\nB1\n"
     assert recorder.requests[1].url.params["kind"] == "idle"
+
+
+def test_team_helpers_call_the_team_endpoints():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(200, json=["firmware"] if request.url.path.endswith("/mine") else [])
+
+    client = TargetHubClient("http://hub", token="t", transport=httpx.MockTransport(handler))
+    assert client.my_teams() == ["firmware"]
+    assert client.list_teams() == []
+    assert seen == ["/api/v1/teams/mine", "/api/v1/teams"]

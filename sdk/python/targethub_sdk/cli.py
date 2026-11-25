@@ -43,6 +43,9 @@ def build_parser() -> argparse.ArgumentParser:
     targets.add_argument("--tag")
     targets.add_argument("--free", action="store_true", help="only targets available now")
 
+    teams = sub.add_parser("teams", help="list your teams (all teams with --all, admin only)")
+    teams.add_argument("--all", action="store_true")
+
     sub.add_parser("reservations", help="list your reservations")
     sub.add_parser("calendar", help="everyone's bookings for the next 7 days")
 
@@ -123,7 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--days", type=int, default=30, help="period ending now (default 30)")
     report.add_argument(
         "--csv",
-        choices=["targets", "tags", "users", "idle", "waitlist"],
+        choices=["targets", "tags", "users", "teams", "idle", "waitlist"],
         help="print this table as CSV instead of the JSON summary",
     )
 
@@ -423,6 +426,8 @@ def dispatch(client: TargetHubClient, args: argparse.Namespace) -> int:
         sys.stdout.write(run_serial(client, args.session_id, args.send, args.wait, args.expect))
     elif command == "console":
         return run_console(client, args.session_id)
+    elif command == "teams":
+        emit(client.list_teams() if args.all else client.my_teams())
     elif command == "tunnel":
         return run_tunnel(client, args.session_id, args.local_port, args.stdio)
     elif command == "log":

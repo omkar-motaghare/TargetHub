@@ -23,6 +23,12 @@ The **Targets** page shows every board with a live state:
 Filter by **tag** (for example `stm32`, `rack-2`, `nightly`) or by state. Each card lists its capabilities
 (serial, power, deploy). A capability marked *simulated* has no real hardware behind it.
 
+## Teams
+
+An admin can reserve some boards for a team. Those boards show their team; if you are not a member, reserving
+or joining the waitlist is refused with the team name, and you can ask an admin to add you
+(`targethub teams` lists your teams).
+
 ## Reserving
 
 - **Reserve**: choose a duration (or a later start time, up to the policy's advance-booking limit) and an

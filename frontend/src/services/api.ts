@@ -27,6 +27,8 @@ import type {
   HealthCheck,
   HealthCheckInput,
   HealthCheckResult,
+  Team,
+  TeamInput,
   UsageCsvKind,
   UsageReport,
 } from './types'
@@ -384,6 +386,14 @@ export const usageReportCsv = (kind: UsageCsvKind, days: number) => {
   const from = new Date(to.getTime() - days * 86_400_000)
   return request<string>(withQuery('/reports/usage.csv', { kind, from: from.toISOString(), to: to.toISOString() }), {}, 'Failed to download the report')
 }
+
+// ---------------------------------------------------------------- teams (admin)
+
+export const listTeams = () => request<Team[]>('/teams', {}, 'Failed to list teams')
+export const myTeams = () => request<string[]>('/teams/mine', {}, 'Failed to load your teams')
+export const createTeam = (input: TeamInput) => request<Team>('/teams', json(input), 'Failed to create the team')
+export const updateTeam = (id: string, input: TeamInput) => request<Team>(`/teams/${id}`, put(input), 'Failed to save the team')
+export const deleteTeam = (id: string) => request<void>(`/teams/${id}`, { method: 'DELETE' }, 'Failed to delete the team')
 
 export const listLabs = () => request<string[]>('/labs', {}, 'Failed to list labs')
 

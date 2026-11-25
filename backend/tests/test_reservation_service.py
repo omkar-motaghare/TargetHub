@@ -33,8 +33,19 @@ class FakeReservation:
     warned_at: datetime | None = None
 
 
+class _NoRows:
+    def all(self):
+        return []
+
+
 class _FakeDb:
     def rollback(self):
+        return None
+
+    def scalars(self, *_args, **_kwargs):  # team restrictions: no board is restricted
+        return _NoRows()
+
+    def scalar(self, *_args, **_kwargs):
         return None
 
 

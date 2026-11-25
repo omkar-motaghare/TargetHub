@@ -19,6 +19,7 @@ CSV_COLUMNS = {
     "targets": ["name", "tags", "reservations", "users", "booked_hours", "utilisation_percent", "idle_reservations", "idle_hours"],
     "tags": ["tag", "targets", "reservations", "booked_hours", "utilisation_percent"],
     "users": ["user_id", "reservations", "targets", "booked_hours", "idle_reservations", "idle_hours"],
+    "teams": ["team", "members", "active_users", "reservations", "booked_hours", "idle_hours"],
     "idle": ["target", "user_id", "starts_at", "hours_held", "note"],
     "waitlist": ["user_id", "target", "tag", "status", "requested_at", "wait_minutes"],
 }
@@ -45,7 +46,7 @@ def usage(
 @router.get("/usage.csv")
 def usage_csv(
     db: DB,
-    kind: Literal["targets", "tags", "users", "idle", "waitlist"] = "targets",
+    kind: Literal["targets", "tags", "users", "teams", "idle", "waitlist"] = "targets",
     start: Annotated[datetime | None, Query(alias="from")] = None,
     end: Annotated[datetime | None, Query(alias="to")] = None,
     _admin=Depends(require_role("admin")),
