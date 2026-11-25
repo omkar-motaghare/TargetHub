@@ -19,8 +19,13 @@
 - **Teams**: group users and reserve boards for a team (Admin → Teams, `/api/v1/teams`, `targethub teams`). Boards
   without a team stay open; restricted boards can be reserved or queued for only by members and admins. The
   usage report adds hours per team.
+- **Searchable transcripts**: `GET /api/v1/transcripts/search` and `targethub grep` find sessions whose console
+  output contains some text.
 - Web UI: upload or pick firmware in the deploy panel, **Admin → Health checks** and **Admin → Reports** (with CSV download).
 - README rewrite and `scripts/setup.sh`, a one-command setup for Linux and macOS.
+
+### Fixed
+- Console transcripts could come back with chunks out of order when several were stored within the same second; chunks now carry microsecond timestamps.
 
 ### Upgrade notes
 - Three migrations run automatically (`artifacts`, health checks, teams). Back up before upgrading. Uploaded artifacts

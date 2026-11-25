@@ -70,6 +70,15 @@ The console is a real terminal in your browser (keyboard input goes straight to 
 - Transcripts are kept for the policy's retention period (30 days by default) and are also available
   from the session page later.
 
+### Searching transcripts
+
+Find the session in which a board printed something: `targethub grep "kernel panic" --days 14 --target BOARD-7`
+lists matching lines with the session id, so you can open the full log with `targethub log <session-id>`.
+The API is `GET /api/v1/transcripts/search?q=...`. It searches console output of your own sessions
+(admins can add `all_users=true`; `include_input=true` also searches what was typed). Matching ignores case and
+colour codes and finds text even when it was split across stored chunks. At most 200 sessions and 100 matches
+are returned per search.
+
 ### SSH, Telnet and debugger tunnel
 
 Some boards offer SSH or Telnet over the network, or a debug probe offers a GDB server. TargetHub

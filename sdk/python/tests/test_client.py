@@ -206,3 +206,15 @@ def test_team_helpers_call_the_team_endpoints():
     assert client.my_teams() == ["firmware"]
     assert client.list_teams() == []
     assert seen == ["/api/v1/teams/mine", "/api/v1/teams"]
+
+
+def test_search_transcripts_sends_filters():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(dict(request.url.params))
+        return httpx.Response(200, json={"hits": [], "truncated": False})
+
+    client = TargetHubClient("http://hub", token="t", transport=httpx.MockTransport(handler))
+    client.search_transcripts("panic", days=7, include_input=True, all_users=True)
+    assert seen == [{"q": "panic", "days": "7", "include_input": "true", "all_users": "true"}]

@@ -96,6 +96,13 @@ def build_parser() -> argparse.ArgumentParser:
     tunnel.add_argument("--local-port", type=int, default=0, help="local port to listen on (default: pick a free one)")
     tunnel.add_argument("--stdio", action="store_true", help="relay stdin/stdout instead (for ssh ProxyCommand)")
 
+    grep = sub.add_parser("grep", help="search serial transcripts of your sessions for some text")
+    grep.add_argument("text")
+    grep.add_argument("--days", type=int, default=30)
+    grep.add_argument("--target", help="only this target (name or id)")
+    grep.add_argument("--include-input", action="store_true", help="also search what users typed")
+    grep.add_argument("--all-users", action="store_true", help="admin: search everyone's sessions")
+
     log = sub.add_parser("log", help="download a serial session transcript")
     log.add_argument("session_id")
     log.add_argument("--include-input", action="store_true")
@@ -426,6 +433,13 @@ def dispatch(client: TargetHubClient, args: argparse.Namespace) -> int:
         sys.stdout.write(run_serial(client, args.session_id, args.send, args.wait, args.expect))
     elif command == "console":
         return run_console(client, args.session_id)
+    elif command == "grep":
+        found = client.search_transcripts(args.text, args.days, args.target, args.include_input, args.all_users)
+        for hit in found["hits"]:
+            sys.stdout.write(f"{hit['session_id'][:8]} {hit['target']} {hit['user_id']} {hit['started_at']}:{hit['line']}: {hit['text']}\n")
+        if found["truncated"]:
+            sys.stderr.write("(more results exist; narrow the search with --days or --target)\n")
+        return 0 if found["hits"] else 1
     elif command == "teams":
         emit(client.list_teams() if args.all else client.my_teams())
     elif command == "tunnel":

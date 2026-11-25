@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -29,7 +29,12 @@ class SerialLogRepository:
         size = len(text.encode("utf-8"))
         if self.stored_bytes(session_id) + size > MAX_TRANSCRIPT_BYTES:
             return False
-        self.db.add(SerialLogChunk(session_id=session_id, direction=direction, size=size, data=text))
+        # Python-side timestamp: microsecond resolution keeps chunks in order (now() ties within a second).
+        self.db.add(
+            SerialLogChunk(
+                session_id=session_id, direction=direction, size=size, data=text, created_at=datetime.now(UTC)
+            )
+        )
         self.db.commit()
         return True
 

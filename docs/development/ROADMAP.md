@@ -18,7 +18,7 @@ CI with PostgreSQL, Windows and Docker jobs · multi-arch image release workflow
 6. ~~**Usage reports**~~ *(done, unreleased: Admin → Reports with CSV by target, tag, user; per-team views and charts still to do)*
 7. ~~**Teams / projects**~~ *(done, unreleased: teams, team-restricted boards, per-team report; per-team policy limits still to do)*
 8. **SSO**: OIDC (Azure AD/Entra ID, Google, Keycloak) and LDAP, alongside local accounts.
-9. **Recording console sessions for replay** and searchable transcripts.
+9. **Recording console sessions for replay** *(searchable transcripts are done, unreleased: `targethub grep`; replay still to do)*
 10. **Plugin interface** for third-party power and debug providers without forking the server.
 
 Have a different priority? Open an issue describing the lab workflow it unblocks.

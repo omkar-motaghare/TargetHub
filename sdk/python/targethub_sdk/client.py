@@ -362,6 +362,21 @@ class TargetHubClient:
     def delete_artifact(self, artifact_id: str) -> None:
         self._request("DELETE", f"/artifacts/{artifact_id}")
 
+    # ------------------------------------------------------------------ transcripts
+
+    def search_transcripts(
+        self, text: str, days: int = 30, target: str | None = None, include_input: bool = False, all_users: bool = False
+    ) -> dict[str, Any]:
+        """Find sessions whose serial output contains ``text`` (case-insensitive)."""
+        params: dict[str, Any] = {"q": text, "days": days}
+        if target:
+            params["target_id"] = self.find_target(target)["id"]
+        if include_input:
+            params["include_input"] = "true"
+        if all_users:
+            params["all_users"] = "true"
+        return self._request("GET", "/transcripts/search", params=params)
+
     # ------------------------------------------------------------------ teams
 
     def my_teams(self) -> list[str]:
