@@ -23,6 +23,9 @@
   output contains some text.
 - **S3-compatible artifact storage** (`ARTIFACT_STORAGE=s3`, bucket, prefix, endpoint for MinIO): agents are
   redirected to short-lived bucket links; earlier local artifacts keep working. `boto3` is now installed in the image.
+- **Provider plugins**: add a power controller, debugger or other server-side driver from a package entry point
+  (`targethub.providers`) or `TARGETHUB_PROVIDER_PLUGINS`, selected with `"driver": "<name>"`. See
+  docs/developer-guide/provider-plugins.md. `GET /api/v1/providers/plugins` lists what loaded.
 - Web UI: upload or pick firmware in the deploy panel, **Admin → Health checks** and **Admin → Reports** (with CSV download).
 - README rewrite and `scripts/setup.sh`, a one-command setup for Linux and macOS.
 

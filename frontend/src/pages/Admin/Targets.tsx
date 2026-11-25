@@ -75,8 +75,8 @@ const CAPABILITY_TYPES: { value: CapabilityType; label: string }[] = [
 
 const BACKENDS: Record<CapabilityType, Backend[]> = {
   serial: ['agent', 'simulated'],
-  power: ['agent', 'dd', 'http', 'simulated'],
-  reset: ['agent', 'dd', 'http', 'simulated'],
+  power: ['agent', 'dd', 'http', 'custom', 'simulated'],
+  reset: ['agent', 'dd', 'http', 'custom', 'simulated'],
   deploy: ['agent', 'custom', 'simulated'],
   tunnel: ['agent'],
   jlink: ['custom', 'simulated'],
@@ -91,7 +91,7 @@ const BACKEND_LABELS: Record<Backend, string> = {
   dd: 'DD power system (server)',
   http: 'HTTP power controller (server)',
   simulated: 'Simulated (demo only)',
-  custom: 'HTTP bridge (server, JSON config)',
+  custom: 'Custom driver / HTTP bridge (server, JSON config)',
 }
 
 const RESOURCE_TYPES: Record<string, string[]> = {
@@ -109,6 +109,7 @@ function inferBackend(capability: TargetCapability): Backend {
   if (config.driver === 'http' || config.mode === 'real') {
     return capability.capability_type === 'power' || capability.capability_type === 'reset' ? 'http' : 'custom'
   }
+  if (config.driver && !['dd', 'http', 'simulated'].includes(String(config.driver))) return 'custom'
   if (config.driver === 'simulated' || config.mode === 'simulated' || Object.keys(config).length === 0) return 'simulated'
   return 'custom'
 }
@@ -332,7 +333,7 @@ function CapabilityEditor({
       )}
 
       {row.backend === 'custom' && (
-        <Field label='Provider configuration (JSON, e.g. {"mode": "real", "controller_url": "…"})' wide>
+        <Field label='Provider configuration (JSON, e.g. {"mode": "real", "controller_url": "…"}, or {"driver": "<plugin name>", …} for an installed plugin)' wide>
           <textarea className="textarea mono" rows={4} value={row.json} onChange={(e) => onChange({ json: e.target.value })} />
         </Field>
       )}

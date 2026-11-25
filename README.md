@@ -152,6 +152,7 @@ capability is backed by one of these options.
 | --- | --- | --- | --- |
 | **DD power system** | TargetHub server | Relay power control through a DD server. No agent needed. | [DD power](docs/power/dd-power.md) |
 | **HTTP power controller** | TargetHub server | Any PDU or relay with a simple REST API. | [Administration](docs/admin-guide/administration.md#http-power-controller-contract) |
+| **Your own driver** | TargetHub server | A plugin package adds any controller or probe. | [Provider plugins](docs/developer-guide/provider-plugins.md) |
 | **Agent hardware** | An agent host (Linux, Raspberry Pi, Windows) | Serial consoles, GPIO relays and deploy commands. | [Agent guide](docs/agents/agent-guide.md) |
 | **Simulated** | Server | Demos only. Refused unless `ALLOW_SIMULATED_PROVIDERS=true`. | [Simulators](docs/development/simulators.md) |
 

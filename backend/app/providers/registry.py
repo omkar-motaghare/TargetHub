@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from app.core.config import settings
+from app.providers import plugins
 from app.providers.base import TargetProvider
 from app.providers.dd_power import DDPowerProvider, build_dd_config
 from app.providers.debugger import DebuggerProvider, build_debugger_provider_config
@@ -56,6 +57,8 @@ def power_driver(provider_config: dict[str, Any] | None) -> str | None:
     cfg = provider_config or {}
     driver = str(cfg.get("driver", "")).strip().lower()
     if driver:
+        if plugins.find("power", driver) is not None:
+            return driver
         if driver not in POWER_DRIVERS:
             raise ValueError(f"power driver must be one of: {', '.join(POWER_DRIVERS)}")
         return driver
@@ -73,6 +76,8 @@ def provider_mode(capability_type: str, provider_config: dict[str, Any] | None, 
     cfg = provider_config or {}
     if agent_backed and family in AGENT_FAMILIES:
         return "agent"
+    if plugins.find(capability_type, cfg.get("driver")) is not None:
+        return "plugin"
     if family == "power":
         return power_driver(cfg) or "unconfigured"
     if family == "serial":
@@ -157,6 +162,10 @@ def validate_provider_config(
     cfg = provider_config or {}
     if agent_backed and family in AGENT_FAMILIES:
         return  # executed by the Agent with its local configuration
+    plugin = plugins.find(capability_type, cfg.get("driver"))
+    if plugin is not None:
+        plugin.plugin.validate(provider_key or capability_type, cfg)
+        return
     mode = provider_mode(capability_type, cfg, agent_backed)
     if mode == "simulated":
         _require_simulation(f"This {capability_type} capability")
@@ -197,6 +206,11 @@ def build_provider(
     family = CAPABILITY_PROVIDERS.get(capability_type)
     if family is None:
         raise ValueError(f"Unsupported capability type '{capability_type}'")
+
+    plugin = plugins.find(capability_type, provider_config.get("driver"))
+    if plugin is not None:
+        plugin.plugin.validate(provider_key, provider_config)
+        return plugins.build(plugin, provider_key, provider_config)
 
     if family == "serial":
         return _build_serial(provider_key, provider_config)

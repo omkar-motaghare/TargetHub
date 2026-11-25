@@ -3,7 +3,8 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.dependencies import get_current_user
+from app.api.dependencies import get_current_user, require_role
+from app.providers import plugins
 from app.providers.serial import SerialProvider, SerialProviderConfig
 
 router = APIRouter(prefix="/providers", tags=["Providers"])
@@ -42,3 +43,9 @@ def serial_health(provider_key: str, _user=Depends(get_current_user)):
     if not result.success:
         raise HTTPException(status_code=503, detail=result.message)
     return result.data
+
+
+@router.get("/plugins")
+def provider_plugins(_admin=Depends(require_role("admin"))):
+    """Provider plugins loaded into this server, and any that failed to load."""
+    return plugins.describe()
