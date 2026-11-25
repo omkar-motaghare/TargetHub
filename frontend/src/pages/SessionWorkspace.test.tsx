@@ -83,6 +83,7 @@ describe('SessionWorkspace', () => {
     renderWorkspace()
 
     const sha = 'a'.repeat(64)
+    fireEvent.click(await screen.findByRole('button', { name: 'Use a URL' }))
     fireEvent.change(await screen.findByLabelText('artifact url'), { target: { value: 'https://x/fw.bin' } })
     fireEvent.change(screen.getByLabelText('artifact sha256'), { target: { value: sha } })
     fireEvent.click(screen.getByRole('button', { name: 'Deploy' }))
@@ -96,5 +97,48 @@ describe('SessionWorkspace', () => {
     expect(await screen.findByText(/This session is closed/)).toBeInTheDocument()
     expect(api.listSessionOperations).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Download console log' })).toBeInTheDocument()
+  })
+  it('uploads a firmware file to TargetHub and deploys it by artifact id', async () => {
+    vi.mocked(api.getSession).mockResolvedValue(makeSession('deploy'))
+    vi.mocked(api.listSessionOperations).mockResolvedValue({ session_id: 's1', capability_type: 'deploy', operations: ['deploy'] })
+    vi.mocked(api.listArtifacts).mockResolvedValue([])
+    vi.mocked(api.uploadArtifact).mockResolvedValue({
+      id: 'a1', name: 'fw.bin', description: null, size_bytes: 2048, sha256: 'b'.repeat(64), content_type: null,
+      uploaded_by: 'alice', created_at: '',
+    })
+    vi.mocked(api.submitSessionOperation).mockResolvedValue({ ...result('deploy'), operation_id: 'op2', status: 'pending' })
+    vi.mocked(api.getOperationStatus).mockResolvedValue({
+      operation_id: 'op2', operation: 'deploy', status: 'completed', message: 'Deployment complete',
+      data: {}, requested_at: '', completed_at: '',
+    })
+
+    renderWorkspace()
+
+    const firmware = new File(['image'], 'fw.bin', { type: 'application/octet-stream' })
+    fireEvent.change(await screen.findByLabelText('firmware file'), { target: { files: [firmware] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Deploy' }))
+    await waitFor(() => expect(api.uploadArtifact).toHaveBeenCalledWith(firmware))
+    await waitFor(() => expect(api.submitSessionOperation).toHaveBeenCalledWith('s1', 'deploy', { artifact_id: 'a1' }))
+    await waitFor(() => expect(screen.getByLabelText('operation log')).toHaveTextContent('uploaded fw.bin'), { timeout: 4000 })
+  })
+
+  it('deploys an earlier upload without uploading again, and asks for a file when nothing is chosen', async () => {
+    vi.mocked(api.getSession).mockResolvedValue(makeSession('deploy'))
+    vi.mocked(api.listSessionOperations).mockResolvedValue({ session_id: 's1', capability_type: 'deploy', operations: ['deploy'] })
+    vi.mocked(api.listArtifacts).mockResolvedValue([
+      { id: 'a9', name: 'old.bin', description: null, size_bytes: 10, sha256: 'c'.repeat(64), content_type: null, uploaded_by: 'alice', created_at: '' },
+    ])
+    vi.mocked(api.submitSessionOperation).mockResolvedValue({ ...result('deploy'), operation_id: undefined, status: undefined })
+
+    renderWorkspace()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Deploy' }))
+    await waitFor(() => expect(screen.getByLabelText('operation log')).toHaveTextContent('Choose a firmware file'))
+    expect(api.submitSessionOperation).not.toHaveBeenCalled()
+
+    fireEvent.change(await screen.findByLabelText('uploaded firmware'), { target: { value: 'a9' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Deploy' }))
+    await waitFor(() => expect(api.submitSessionOperation).toHaveBeenCalledWith('s1', 'deploy', { artifact_id: 'a9' }))
+    expect(api.uploadArtifact).not.toHaveBeenCalled()
   })
 })

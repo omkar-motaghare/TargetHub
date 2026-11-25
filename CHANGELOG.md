@@ -12,6 +12,7 @@
   in Admin → Overview. API under `/api/v1/targets/<id>/health-check`.
 - **Usage reports** (admin): utilisation per target and tag, idle reservations, per-user hours and waitlist
   times as JSON or CSV; `targethub report`.
+- Web UI: upload or pick firmware in the deploy panel, **Admin → Health checks** and **Admin → Reports** (with CSV download).
 - README rewrite and `scripts/setup.sh`, a one-command setup for Linux and macOS.
 
 ### Upgrade notes

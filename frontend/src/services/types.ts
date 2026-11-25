@@ -308,3 +308,87 @@ export type PowerCheckResult = {
   message: string
   data: Record<string, unknown> | null
 }
+
+export type Artifact = {
+  id: string
+  name: string
+  description: string | null
+  size_bytes: number
+  sha256: string
+  content_type: string | null
+  uploaded_by: string
+  created_at: string
+}
+
+export type HealthCheckInput = {
+  enabled: boolean
+  boot_pattern: string
+  interval_minutes: number
+  boot_timeout_seconds: number
+  power_operation: 'cycle' | 'reset' | 'on'
+  failure_threshold: number
+  auto_maintenance: boolean
+}
+
+export type HealthCheck = HealthCheckInput & {
+  target_id: string
+  next_run_at: string | null
+  last_run_at: string | null
+  last_status: 'passed' | 'failed' | 'skipped' | null
+  last_message: string | null
+  consecutive_failures: number
+  maintenance_by_check: boolean
+}
+
+export type HealthCheckResult = {
+  status: 'passed' | 'failed' | 'skipped'
+  message: string
+  duration_seconds: number
+  trigger: 'schedule' | 'manual'
+  started_at: string
+}
+
+export type UsageReport = {
+  period: { from: string; to: string; hours: number }
+  totals: {
+    targets: number
+    reservations: number
+    users: number
+    booked_hours: number
+    idle_reservations: number
+    idle_hours: number
+    idle_share_percent: number
+  }
+  targets: {
+    target_id: string
+    name: string
+    tags: string[]
+    reservations: number
+    users: number
+    booked_hours: number
+    utilisation_percent: number
+    idle_reservations: number
+    idle_hours: number
+  }[]
+  tags: { tag: string; targets: number; reservations: number; booked_hours: number; utilisation_percent: number }[]
+  users: {
+    user_id: string
+    reservations: number
+    targets: number
+    booked_hours: number
+    idle_reservations: number
+    idle_hours: number
+  }[]
+  idle: { reservation_id: string; target: string; user_id: string; starts_at: string; hours_held: number; note: string | null }[]
+  waitlist: {
+    entries: number
+    fulfilled: number
+    waiting: number
+    cancelled: number
+    expired: number
+    average_wait_minutes: number | null
+    longest_wait_minutes: number | null
+  }
+}
+
+export type UsageCsvKind = 'targets' | 'tags' | 'users' | 'idle' | 'waitlist'

@@ -4,15 +4,18 @@ import { Link, useParams } from 'react-router'
 import SerialConsole from '../components/SerialConsole'
 import {
   closeSession,
+  deleteArtifact,
   executeSessionOperation,
   getOperationStatus,
   getSession,
   getTarget,
+  listArtifacts,
   listSessionOperations,
   serialLog,
   submitSessionOperation,
+  uploadArtifact,
 } from '../services/api'
-import type { ProviderResult, Session, Target } from '../services/types'
+import type { Artifact, ProviderResult, Session, Target } from '../services/types'
 import { capabilityModeLabel, downloadText, errorMessage, prettyTime, relativeTime } from '../utils/ui'
 
 const POWER_OPERATIONS: { op: string; label: string; confirm?: string }[] = [
@@ -83,18 +86,57 @@ function PowerPanel({ sessionId, operations, log }: { sessionId: string; operati
   )
 }
 
+function formatSize(bytes: number): string {
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MiB`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KiB`
+  return `${bytes} B`
+}
+
 function DeployPanel({ sessionId, log }: { sessionId: string; log: (line: LogLine) => void }) {
+  const [mode, setMode] = useState<'upload' | 'url'>('upload')
   const [url, setUrl] = useState('')
   const [sha256, setSha256] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [artifacts, setArtifacts] = useState<Artifact[]>([])
+  const [artifactId, setArtifactId] = useState('')
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  const refreshArtifacts = useCallback(async () => {
+    try {
+      const mine = await listArtifacts(true)
+      setArtifacts(Array.isArray(mine) ? mine.slice(0, 20) : [])
+    } catch {
+      setArtifacts([]) // the list is a convenience; deploying by URL still works
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshArtifacts()
+  }, [refreshArtifacts])
 
   async function deploy(event: React.FormEvent): Promise<void> {
     event.preventDefault()
     setBusy(true)
     setStatus('queued')
     try {
-      const queued = await submitSessionOperation(sessionId, 'deploy', { url, sha256 })
+      let params: Record<string, unknown> = { url, sha256 }
+      if (mode === 'upload') {
+        let chosen = artifactId
+        if (!chosen) {
+          if (!file) throw new Error('Choose a firmware file or a previously uploaded image.')
+          setStatus('uploading')
+          const uploaded = await uploadArtifact(file)
+          chosen = uploaded.id
+          setArtifactId(uploaded.id)
+          setFile(null)
+          log({ at: new Date().toISOString(), text: `uploaded ${uploaded.name} (${formatSize(uploaded.size_bytes)}, sha256 ${uploaded.sha256.slice(0, 12)}…)`, ok: true })
+          void refreshArtifacts()
+        }
+        params = { artifact_id: chosen }
+        setStatus('queued')
+      }
+      const queued = await submitSessionOperation(sessionId, 'deploy', params)
       if (!queued.operation_id) {
         log({ at: new Date().toISOString(), text: `deploy: ${queued.message}`, ok: true })
         setStatus('completed')
@@ -122,15 +164,52 @@ function DeployPanel({ sessionId, log }: { sessionId: string; log: (line: LogLin
     }
   }
 
+  async function removeSelected(): Promise<void> {
+    if (!artifactId || !window.confirm('Delete this uploaded firmware from TargetHub?')) return
+    try {
+      await deleteArtifact(artifactId)
+      setArtifactId('')
+      void refreshArtifacts()
+    } catch (error) {
+      log({ at: new Date().toISOString(), text: `delete artifact: ${errorMessage(error)}`, ok: false })
+    }
+  }
+
   return (
     <section className="card">
       <h3 style={{ marginTop: 0 }}>Deploy firmware</h3>
-      <p className="muted small">The Agent downloads the artifact, verifies its SHA-256 and runs the flash command configured on the Agent host.</p>
-      <form onSubmit={(event) => void deploy(event)} className="stack">
-        <input className="input" aria-label="artifact url" placeholder="https://artifacts.example.com/firmware.bin"
-          value={url} onChange={(event) => setUrl(event.target.value)} required />
-        <input className="input mono" aria-label="artifact sha256" placeholder="sha256 (64 hex characters)" value={sha256}
-          onChange={(event) => setSha256(event.target.value.trim())} pattern="[0-9a-fA-F]{64}" required />
+      <p className="muted small">The Agent downloads the firmware, verifies its SHA-256 and runs the flash command configured on the Agent host.</p>
+      <div className="chip-row" role="group" aria-label="firmware source">
+        <button type="button" className={`chip ${mode === 'upload' ? 'active' : ''}`} onClick={() => setMode('upload')}>Upload a file</button>
+        <button type="button" className={`chip ${mode === 'url' ? 'active' : ''}`} onClick={() => setMode('url')}>Use a URL</button>
+      </div>
+      <form onSubmit={(event) => void deploy(event)} className="stack" style={{ marginTop: '0.6rem' }}>
+        {mode === 'upload' ? (
+          <>
+            <input className="input" type="file" aria-label="firmware file"
+              onChange={(event) => { setFile(event.target.files?.[0] ?? null); setArtifactId('') }} />
+            {artifacts.length > 0 && (
+              <div className="toolbar">
+                <select className="input" aria-label="uploaded firmware" value={artifactId}
+                  onChange={(event) => { setArtifactId(event.target.value); if (event.target.value) setFile(null) }}>
+                  <option value="">Or pick one you uploaded earlier…</option>
+                  {artifacts.map((item) => (
+                    <option key={item.id} value={item.id}>{item.name} · {formatSize(item.size_bytes)} · {item.sha256.slice(0, 8)}</option>
+                  ))}
+                </select>
+                {artifactId && <button type="button" className="button ghost danger" onClick={() => void removeSelected()}>Delete</button>}
+              </div>
+            )}
+            <p className="muted small">Uploaded files are stored on the TargetHub server and handed to the Agent through a short-lived link.</p>
+          </>
+        ) : (
+          <>
+            <input className="input" aria-label="artifact url" placeholder="https://artifacts.example.com/firmware.bin"
+              value={url} onChange={(event) => setUrl(event.target.value)} required />
+            <input className="input mono" aria-label="artifact sha256" placeholder="sha256 (64 hex characters)" value={sha256}
+              onChange={(event) => setSha256(event.target.value.trim())} pattern="[0-9a-fA-F]{64}" required />
+          </>
+        )}
         <div className="toolbar">
           <button className="button" type="submit" disabled={busy}>{busy ? 'Deploying…' : 'Deploy'}</button>
           {status && <span className={`status-pill ${status}`}>{status.replace('_', ' ')}</span>}

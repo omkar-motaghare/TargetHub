@@ -103,7 +103,7 @@ platform, agent version and discovered resources.
 
 A health check powers a board and waits for text on its serial console (a boot banner or login prompt). It
 catches boards that have silently stopped booting before an engineer does. Configure it per target with
-`PUT /api/v1/targets/<id>/health-check` (admin only; there is no web UI page for it yet):
+**Admin → Health checks** (choose a target, then *Set up* or *Edit*), or with `PUT /api/v1/targets/<id>/health-check` (admin only):
 
 ```json
 {"enabled": true, "boot_pattern": "login:", "interval_minutes": 1440, "boot_timeout_seconds": 60,
@@ -130,7 +130,7 @@ so choose the interval and quiet hours accordingly.
 
 ## Usage reports
 
-**Reports** (admin only) show how the lab is used, to decide what to buy, retire or fix:
+**Admin → Reports** shows how the lab is used, to decide what to buy, retire or fix:
 
 - **Utilisation** per target and per tag: booked hours and the percentage of the period each board was held.
   Reservations count for the time they actually held the board (until release or expiry; a running one counts
@@ -153,8 +153,9 @@ The API is `GET /api/v1/reports/usage?from=<iso>&to=<iso>` (default: the last 30
 
 ## Firmware artifacts
 
-Users with the *user* or *admin* role can upload firmware images (`POST /api/v1/artifacts`, or
-`targethub artifact upload`). TargetHub stores each file on the server's disk, records its SHA-256, and
+Users with the *user* or *admin* role can upload firmware images from the **Deploy firmware** panel of a deploy
+session (*Upload a file*, or pick one uploaded earlier), with `POST /api/v1/artifacts`, or with
+`targethub artifact upload`. TargetHub stores each file on the server's disk, records its SHA-256, and
 deploys it by id: the agent receives a signed link that expires after 15 minutes and verifies the checksum
 before flashing. Only the uploader or an admin can delete an artifact.
 

@@ -23,6 +23,12 @@ import type {
   Webhook,
   PowerCheckResult,
   SystemOverview,
+  Artifact,
+  HealthCheck,
+  HealthCheckInput,
+  HealthCheckResult,
+  UsageCsvKind,
+  UsageReport,
 } from './types'
 
 export class ApiError extends Error {
@@ -332,6 +338,52 @@ export const deleteCapability = (targetId: string, capabilityId: string) =>
 export const getSystemOverview = () => request<SystemOverview>('/system/overview', {}, 'Failed to load the system overview')
 export const checkPower = (capability_type: string, provider_config: Record<string, unknown>) =>
   request<PowerCheckResult>('/system/power-check', json({ capability_type, provider_config }), 'Power check failed')
+
+// ---------------------------------------------------------------- artifacts
+
+export function uploadArtifact(file: File, description?: string): Promise<Artifact> {
+  const form = new FormData()
+  form.append('file', file)
+  if (description) form.append('description', description)
+  return request<Artifact>('/artifacts', { method: 'POST', body: form }, 'Failed to upload the firmware')
+}
+export const listArtifacts = (mine = false) =>
+  request<Artifact[]>(withQuery('/artifacts', { mine: mine || undefined }), {}, 'Failed to list artifacts')
+export const deleteArtifact = (id: string) =>
+  request<void>(`/artifacts/${id}`, { method: 'DELETE' }, 'Failed to delete the artifact')
+
+// ---------------------------------------------------------------- health checks (admin)
+
+/** The configured check for a target, or null when none exists yet. */
+export async function getHealthCheck(targetId: string): Promise<HealthCheck | null> {
+  try {
+    return await request<HealthCheck>(`/targets/${targetId}/health-check`, {}, 'Failed to load the health check')
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null
+    throw error
+  }
+}
+export const saveHealthCheck = (targetId: string, input: HealthCheckInput) =>
+  request<HealthCheck>(`/targets/${targetId}/health-check`, put(input), 'Failed to save the health check')
+export const deleteHealthCheck = (targetId: string) =>
+  request<void>(`/targets/${targetId}/health-check`, { method: 'DELETE' }, 'Failed to remove the health check')
+export const runHealthCheck = (targetId: string) =>
+  request<{ status: string; message: string }>(`/targets/${targetId}/health-check/run`, { method: 'POST' }, 'The health check failed to run')
+export const healthCheckResults = (targetId: string) =>
+  request<HealthCheckResult[]>(`/targets/${targetId}/health-check/results`, {}, 'Failed to load the results')
+
+// ---------------------------------------------------------------- reports (admin)
+
+export const usageReport = (days: number) => {
+  const to = new Date()
+  const from = new Date(to.getTime() - days * 86_400_000)
+  return request<UsageReport>(withQuery('/reports/usage', { from: from.toISOString(), to: to.toISOString() }), {}, 'Failed to load the usage report')
+}
+export const usageReportCsv = (kind: UsageCsvKind, days: number) => {
+  const to = new Date()
+  const from = new Date(to.getTime() - days * 86_400_000)
+  return request<string>(withQuery('/reports/usage.csv', { kind, from: from.toISOString(), to: to.toISOString() }), {}, 'Failed to download the report')
+}
 
 export const listLabs = () => request<string[]>('/labs', {}, 'Failed to list labs')
 
