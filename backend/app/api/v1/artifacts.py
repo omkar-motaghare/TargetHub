@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -100,6 +100,9 @@ def download_artifact(artifact_id: str, db: DB, expires: int = Query(), signatur
         raise HTTPException(status_code=403, detail="invalid or expired download link")
     service = ArtifactService(db)
     artifact = service.get(artifact_id)
+    if service.is_remote(artifact):
+        # The bytes come straight from the bucket; the redirect target is valid for five minutes.
+        return RedirectResponse(service.presigned_download_url(artifact), status_code=302)
     return FileResponse(
         service.path_for(artifact),
         media_type="application/octet-stream",

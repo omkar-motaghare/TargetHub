@@ -13,7 +13,7 @@ CI with PostgreSQL, Windows and Docker jobs · multi-arch image release workflow
    hardware, a Raspberry Pi with relays and a Windows agent; fix what differs.
 2. ~~**SSH/Telnet access to targets**~~ *(done, unreleased: agent tunnels bound to the session, `targethub tunnel`)*
 3. ~~**Debugger integration**~~ *(done, unreleased: the same tunnel starts an OpenOCD/J-Link GDB server for the session; VS Code `miDebuggerServerAddress`)*
-4. ~~**Artifact upload**~~ *(done, unreleased: local disk storage and the deploy panel upload; S3-compatible storage still to do)*
+4. ~~**Artifact upload**~~ *(done, unreleased: local disk or S3-compatible storage, and the deploy panel upload)*
 5. ~~**Board health checks**~~ *(done, unreleased: API, scheduler and Admin → Health checks)*
 6. ~~**Usage reports**~~ *(done, unreleased: Admin → Reports with CSV by target, tag, user; per-team views and charts still to do)*
 7. ~~**Teams / projects**~~ *(done, unreleased: teams, team-restricted boards, per-team report; per-team policy limits still to do)*

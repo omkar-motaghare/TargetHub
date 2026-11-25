@@ -21,6 +21,30 @@ CHUNK_SIZE = 1024 * 1024
 _UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 
 
+S3_PREFIX = "s3:"
+
+
+def _s3_client():
+    """boto3 S3 client for the configured bucket (credentials from the usual AWS environment/role)."""
+    try:
+        import boto3
+    except ImportError as exc:  # pragma: no cover - depends on the install
+        raise ArtifactError("ARTIFACT_STORAGE=s3 needs the boto3 package (pip install boto3)") from exc
+    kwargs = {}
+    if settings.artifact_s3_endpoint_url:
+        kwargs["endpoint_url"] = settings.artifact_s3_endpoint_url
+    if settings.artifact_s3_region:
+        kwargs["region_name"] = settings.artifact_s3_region
+    return boto3.client("s3", **kwargs)
+
+
+def _s3_delete_quietly(key: str) -> None:
+    try:
+        _s3_client().delete_object(Bucket=settings.artifact_s3_bucket, Key=key)
+    except Exception:  # noqa: BLE001 - an orphaned object is better than a failed request
+        pass
+
+
 class ArtifactError(ValueError):
     """The upload cannot be stored (empty, too large, unusable name)."""
 
@@ -69,12 +93,15 @@ class ArtifactService:
             uploaded_by=uploaded_by,
         )
         artifact.id = str(uuid.uuid4())
+        use_s3 = settings.artifact_storage == "s3"
         root = storage_root()
         relative = f"{artifact.id[:2]}/{artifact.id}"
-        destination = root / relative
+        # Always stream to local disk first (computing the checksum); S3 uploads then copy it up.
+        destination = root / (f".incoming-{artifact.id}" if use_s3 else relative)
         destination.parent.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256()
         size = 0
+        uploaded_key: str | None = None
         try:
             with destination.open("wb") as out:
                 while chunk := stream.read(CHUNK_SIZE):
@@ -87,17 +114,29 @@ class ArtifactService:
                     out.write(chunk)
             if size == 0:
                 raise ArtifactError("artifact is empty")
+            if use_s3:
+                uploaded_key = f"{settings.artifact_s3_prefix}{relative}"
+                _s3_client().upload_file(str(destination), settings.artifact_s3_bucket, uploaded_key)
+                artifact.storage_path = S3_PREFIX + uploaded_key
+                destination.unlink(missing_ok=True)
+            else:
+                artifact.storage_path = relative
             artifact.size_bytes = size
             artifact.sha256 = digest.hexdigest()
-            artifact.storage_path = relative
             self.db.add(artifact)
             self.db.commit()
         except BaseException:
             destination.unlink(missing_ok=True)
+            if uploaded_key is not None:
+                _s3_delete_quietly(uploaded_key)
             self.db.rollback()
             raise
         self.db.refresh(artifact)
         return artifact
+
+    @staticmethod
+    def is_remote(artifact: Artifact) -> bool:
+        return artifact.storage_path.startswith(S3_PREFIX)
 
     def path_for(self, artifact: Artifact) -> Path:
         root = storage_root()
@@ -107,6 +146,27 @@ class ArtifactService:
         if not path.is_file():
             raise ResourceNotFound("Artifact file", artifact.id)
         return path
+
+    def ensure_available(self, artifact: Artifact) -> None:
+        """Raise ResourceNotFound when the stored file is missing."""
+        if not self.is_remote(artifact):
+            self.path_for(artifact)
+            return
+        try:
+            _s3_client().head_object(Bucket=settings.artifact_s3_bucket, Key=artifact.storage_path[len(S3_PREFIX):])
+        except Exception as exc:  # noqa: BLE001 - boto raises ClientError for 404/403 alike
+            raise ResourceNotFound("Artifact file", artifact.id) from exc
+
+    def presigned_download_url(self, artifact: Artifact, ttl_seconds: int = 300) -> str:
+        return _s3_client().generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": settings.artifact_s3_bucket,
+                "Key": artifact.storage_path[len(S3_PREFIX):],
+                "ResponseContentDisposition": f'attachment; filename="{artifact.name}"',
+            },
+            ExpiresIn=ttl_seconds,
+        )
 
     # ------------------------------------------------------------------ queries
 
@@ -123,11 +183,14 @@ class ArtifactService:
         return list(self.db.scalars(statement).all())
 
     def delete(self, artifact: Artifact) -> None:
+        remote_key = artifact.storage_path[len(S3_PREFIX):] if self.is_remote(artifact) else None
         root = storage_root()
         path = (root / artifact.storage_path).resolve()
         self.db.delete(artifact)
         self.db.commit()
-        if root in path.parents:
+        if remote_key is not None:
+            _s3_delete_quietly(remote_key)
+        elif root in path.parents:
             path.unlink(missing_ok=True)
 
     # ------------------------------------------------------------- signed links
@@ -160,7 +223,7 @@ class ArtifactService:
         if not artifact_id:
             return params
         artifact = self.get(str(artifact_id))
-        self.path_for(artifact)  # fail early if the file is gone
+        self.ensure_available(artifact)  # fail early if the file is gone
         resolved = {k: v for k, v in params.items() if k != "artifact_id"}
         resolved.update(
             url=self.signed_url(artifact),

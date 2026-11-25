@@ -58,6 +58,13 @@ class Settings(BaseSettings):
     artifact_dir: str = "artifacts"
     artifact_max_bytes: int = 512 * 1024 * 1024
     artifact_url_ttl_seconds: int = 900
+    # "local" keeps files on disk (ARTIFACT_DIR); "s3" stores new uploads in an S3-compatible bucket
+    # (AWS S3, MinIO, Ceph...). Existing artifacts stay where they were written.
+    artifact_storage: str = "local"
+    artifact_s3_bucket: str = ""
+    artifact_s3_prefix: str = "artifacts/"
+    artifact_s3_endpoint_url: str = ""
+    artifact_s3_region: str = ""
 
     # Background lab maintenance (expiry, warnings, waitlist, retention).
     scheduler_enabled: bool = True
@@ -66,6 +73,14 @@ class Settings(BaseSettings):
     # Failed logins / password changes allowed per client IP + username within the window.
     auth_max_failures: int = 5
     auth_failure_window_seconds: int = 300
+
+    @model_validator(mode="after")
+    def check_artifact_storage(self) -> "Settings":
+        if self.artifact_storage not in {"local", "s3"}:
+            raise ValueError("ARTIFACT_STORAGE must be 'local' or 's3'")
+        if self.artifact_storage == "s3" and not self.artifact_s3_bucket.strip():
+            raise ValueError("ARTIFACT_S3_BUCKET is required when ARTIFACT_STORAGE=s3")
+        return self
 
     @model_validator(mode="after")
     def reject_weak_secret_key(self) -> "Settings":

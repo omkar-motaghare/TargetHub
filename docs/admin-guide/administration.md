@@ -174,6 +174,27 @@ before flashing. Only the uploader or an admin can delete an artifact.
 | `ARTIFACT_MAX_BYTES` | 536870912 (512 MiB) | Largest accepted upload. |
 | `ARTIFACT_URL_TTL_SECONDS` | 900 | Lifetime of the signed download link given to an agent. |
 
+### Storing artifacts in S3 or MinIO
+
+Set `ARTIFACT_STORAGE=s3` to keep new uploads in an S3-compatible bucket instead of on the server's disk,
+so the images survive a rebuilt server and are included in your bucket's own backups.
+
+| Setting (`.env`) | Meaning |
+| --- | --- |
+| `ARTIFACT_STORAGE` | `local` (default) or `s3` |
+| `ARTIFACT_S3_BUCKET` | bucket name (required with `s3`) |
+| `ARTIFACT_S3_PREFIX` | key prefix, default `artifacts/` |
+| `ARTIFACT_S3_ENDPOINT_URL` | only for non-AWS stores such as MinIO or Ceph, for example `https://minio.lab:9000` |
+| `ARTIFACT_S3_REGION` | region, if your store needs one |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | credentials (an instance role works too on AWS) |
+
+The server streams each upload to a temporary file to compute the SHA-256, copies it to the bucket and removes
+the temporary file. Agents still ask TargetHub for the signed link (so the same expiry and checks apply); TargetHub
+answers with a redirect to a five-minute link on the bucket, so firmware bytes do not pass through the server. The
+credentials need `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` on the prefix. Each artifact remembers where it
+was stored, so switching the setting later does not break earlier uploads. The bucket stays private; agents never
+need bucket credentials.
+
 `TARGETHUB_PUBLIC_URL` must be an address the **agents** can reach, because the signed link is built from it;
 agents also require HTTPS unless configured with `allow_insecure_http`. `scripts/backup.sh` backs up the
 database only: the artifact files are in the `artifacts` volume, so back that up separately if you need the

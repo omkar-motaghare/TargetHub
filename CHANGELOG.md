@@ -21,6 +21,8 @@
   usage report adds hours per team.
 - **Searchable transcripts**: `GET /api/v1/transcripts/search` and `targethub grep` find sessions whose console
   output contains some text.
+- **S3-compatible artifact storage** (`ARTIFACT_STORAGE=s3`, bucket, prefix, endpoint for MinIO): agents are
+  redirected to short-lived bucket links; earlier local artifacts keep working. `boto3` is now installed in the image.
 - Web UI: upload or pick firmware in the deploy panel, **Admin → Health checks** and **Admin → Reports** (with CSV download).
 - README rewrite and `scripts/setup.sh`, a one-command setup for Linux and macOS.
 
